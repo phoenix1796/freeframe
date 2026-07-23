@@ -390,8 +390,11 @@ export function ProgressBar({
           style={{ width: `${bufferedPercent}%` }}
         />
 
-        {/* Time-range comment spans */}
-        {rangeMarkers.map((c) => {
+        {/* Time-range comment spans — wait for a real duration so these don't
+            render at a bogus 0% (timeToPercent falls back to 0 with no
+            duration) and then jump to their real position once it loads,
+            which shows up as a jarring layout shift mid-interaction. */}
+        {duration > 0 && rangeMarkers.map((c) => {
           if (c.timecode_start === null || c.timecode_end === null) return null
           const left = timeToPercent(c.timecode_start)
           const right = timeToPercent(c.timecode_end)
@@ -423,8 +426,9 @@ export function ProgressBar({
         />
       </div>
 
-      {/* Comment markers row — below the progress bar */}
-      {pointMarkers.length > 0 && (
+      {/* Comment markers row — below the progress bar. Same duration guard
+          as the range markers above, same reason. */}
+      {duration > 0 && pointMarkers.length > 0 && (
         <div className="relative w-full h-6 mt-0.5">
           {pointMarkers.map((c, idx) => {
             if (c.timecode_start === null) return null
