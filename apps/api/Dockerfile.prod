@@ -2,8 +2,15 @@ FROM python:3.11-slim
 
 WORKDIR /workspace
 
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
+# Pin ffmpeg to major version 7 (Debian's ffmpeg package epoch tracks its
+# major version, e.g. "7:7.1.5-0+deb13u1") — floats on patch/security
+# updates within v7, but fails the build instead of silently jumping to a
+# new major version if the base image's Debian release ever moves on.
+RUN apt-get update && \
+    FFMPEG_PKG="$(apt-cache madison ffmpeg | awk '{print $3}' | grep -E '^7:' | head -n1)" && \
+    test -n "$FFMPEG_PKG" && \
+    apt-get install -y \
+    ffmpeg=$FFMPEG_PKG \
     imagemagick \
     curl \
     && rm -rf /var/lib/apt/lists/*
