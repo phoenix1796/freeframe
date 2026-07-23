@@ -159,29 +159,44 @@ class FFmpegTranscoder(BaseTranscoder):
         input_url = self._get_presigned_url(job.input_s3_key, expires_in=7200)
 
         try:
-            # 1. Get video metadata via streaming (no download)
+            # 1. Get video + audio info in a single streaming probe. Previously
+            # two separate ffprobe calls (one -select_streams v:0, one -select_streams a)
+            # each opened the presigned URL and re-read the container header —
+            # redundant for a large remote file. One unfiltered probe covers both;
+            # parse_probe_metadata still gets a video-only stream list (its
+            # contract, shared with get_video_metadata/backfill, assumes
+            # streams[0] is video) by filtering client-side here instead.
             cmd = [
                 "ffprobe", "-v", "error", "-print_format", "json",
-                "-show_streams", "-select_streams", "v:0", "-show_format", input_url,
+                "-show_streams", "-show_format", input_url,
             ]
-            vid_info = self._run(cmd, timeout=120, label="ffprobe")
-            meta = parse_probe_metadata(json.loads(vid_info))
+            probe_result = self._run(cmd, timeout=120, label="ffprobe")
+            probe_data = json.loads(probe_result)
+            video_streams = [s for s in probe_data.get("streams", []) if s.get("codec_type") == "video"]
+            has_audio = any(s.get("codec_type") == "audio" for s in probe_data.get("streams", []))
+            meta = parse_probe_metadata({"streams": video_streams, "format": probe_data.get("format")})
 
-            # 2. Check if input has an audio stream
-            audio_cmd = [
-                "ffprobe", "-v", "error", "-print_format", "json",
-                "-show_streams", "-select_streams", "a", input_url,
-            ]
-            audio_result = self._run(audio_cmd, timeout=120, label="ffprobe")
-            has_audio = bool(json.loads(audio_result).get("streams"))
-
-            # 3. Build quality ladder based on available qualities
+            # 2. Build quality ladder based on available qualities
             QUALITY_MAP = {
                 "1080p": ("1920:1080", 20),
                 "720p": ("1280:720", 22),
                 "360p": ("640:360", 26),
             }
             qualities = [q for q in job.qualities if q in QUALITY_MAP]
+
+            # Cap per-encoder x264 threads so N simultaneous quality branches
+            # (this ffmpeg process, via filter_complex split) times M concurrent
+            # transcode tasks (celery worker -c concurrency) can't oversubscribe
+            # the host's cores. Left unset, libx264's threads=auto has every
+            # encoder independently detect and grab up to cpu_count() threads —
+            # e.g. 3 qualities x 2 concurrent tasks means 6 encoders each trying
+            # to claim all 12 cores, so CPU stays busy context-switching/thrashing
+            # cache rather than idle, without actually going faster.
+            try:
+                _concurrency = max(1, int(os.environ.get("TRANSCODING_CONCURRENCY", "2")))
+            except ValueError:
+                _concurrency = 2
+            threads_per_encoder = max(1, (os.cpu_count() or 4) // max(1, len(qualities) * _concurrency))
 
             hls_dir = work_dir / "hls"
             hls_dir.mkdir()
@@ -208,6 +223,7 @@ class FFmpegTranscoder(BaseTranscoder):
                     ffmpeg_cmd += ["-map", "a:0"]
                 ffmpeg_cmd += [
                     f"-c:v:{i}", "libx264", f"-crf", str(crf), "-preset", "fast",
+                    f"-threads:v:{i}", str(threads_per_encoder),
                     "-force_key_frames", "expr:gte(t,n_forced*2)",
                 ]
 
