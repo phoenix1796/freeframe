@@ -8,13 +8,13 @@ Applies to all API requests. Uses Redis sliding window counters.
 Separate limits for read (GET/HEAD/OPTIONS) vs write (POST/PUT/PATCH/DELETE).
 """
 
+import redis.asyncio as aioredis
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from jose import jwt, JWTError
 
 from ..config import settings
-from ..services.redis_service import get_redis
 
 # Limits per window — tuned for media-review workflows where a single folder
 # page can trigger 10+ paginated asset fetches plus SWR calls for project,
@@ -30,6 +30,23 @@ EXEMPT_PATHS = {
     "/redoc",
     "/openapi.json",
 }
+
+# A dedicated async connection pool, separate from redis_service.py's sync
+# client. This middleware's dispatch() is unconditionally async (Starlette's
+# BaseHTTPMiddleware requires it) and runs on every single request, unlike
+# redis_service.py's callers which are all plain `def` route handlers/
+# dependencies that FastAPI already runs in a threadpool. A *sync* redis call
+# here would block this worker's entire event loop — every other concurrent
+# request on the same worker stalls until this one's Redis round-trip
+# returns, not just this request. Same pattern as services/event_service.py.
+_pool = None
+
+
+def _get_redis() -> aioredis.Redis:
+    global _pool
+    if _pool is None:
+        _pool = aioredis.ConnectionPool.from_url(settings.redis_url, decode_responses=True)
+    return aioredis.Redis(connection_pool=_pool)
 
 
 class GlobalRateLimitMiddleware(BaseHTTPMiddleware):
@@ -49,7 +66,7 @@ class GlobalRateLimitMiddleware(BaseHTTPMiddleware):
         limit = WRITE_LIMIT if is_write else READ_LIMIT
 
         # Check rate limit
-        allowed, retry_after = self._check(identity, action, limit)
+        allowed, retry_after = await self._check(identity, action, limit)
         if not allowed:
             return JSONResponse(
                 status_code=429,
@@ -60,7 +77,8 @@ class GlobalRateLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
     def _get_identity(self, request: Request) -> str:
-        """Extract user ID from JWT or fall back to IP."""
+        """Extract user ID from JWT or fall back to IP. Pure CPU-bound
+        (no I/O), safe to call directly from async code without awaiting."""
         auth_header = request.headers.get("authorization", "")
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
@@ -82,20 +100,20 @@ class GlobalRateLimitMiddleware(BaseHTTPMiddleware):
         )
         return f"ip:{ip}"
 
-    def _check(self, identity: str, action: str, max_requests: int) -> tuple[bool, int]:
+    async def _check(self, identity: str, action: str, max_requests: int) -> tuple[bool, int]:
         try:
-            r = get_redis()
+            r = _get_redis()
             key = f"grl:{action}:{identity}"
-            current = r.get(key)
+            current = await r.get(key)
 
             if current is not None and int(current) >= max_requests:
-                ttl = r.ttl(key)
+                ttl = await r.ttl(key)
                 return False, max(ttl, 1)
 
             pipe = r.pipeline()
             pipe.incr(key)
             pipe.expire(key, WINDOW_SECONDS, nx=True)
-            pipe.execute()
+            await pipe.execute()
             return True, 0
         except Exception:
             # Fail open — allow the request if Redis is unavailable

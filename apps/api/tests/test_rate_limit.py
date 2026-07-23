@@ -1,6 +1,6 @@
 """Tests for rate limiting functionality."""
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 class TestCheckRateLimit:
@@ -123,8 +123,7 @@ class TestGlobalRateLimitMiddleware:
         assert "/redoc" in EXEMPT_PATHS
         assert "/openapi.json" in EXEMPT_PATHS
 
-    @patch("apps.api.middleware.global_rate_limit.get_redis")
-    def test_get_identity_extracts_user_from_jwt(self, mock_get_redis):
+    def test_get_identity_extracts_user_from_jwt(self):
         from apps.api.middleware.global_rate_limit import GlobalRateLimitMiddleware
         from apps.api.config import settings
 
@@ -155,33 +154,38 @@ class TestGlobalRateLimitMiddleware:
         identity = middleware._get_identity(mock_request)
         assert identity == "ip:203.0.113.1"
 
-    @patch("apps.api.middleware.global_rate_limit.get_redis")
-    def test_check_allows_under_limit(self, mock_get_redis):
+    @pytest.mark.asyncio
+    @patch("apps.api.middleware.global_rate_limit._get_redis")
+    async def test_check_allows_under_limit(self, mock_get_redis):
+        """_check() is async (redis.asyncio — see module docstring on why this
+        middleware specifically can't use the sync client other callers use)."""
         from apps.api.middleware.global_rate_limit import GlobalRateLimitMiddleware
 
         mock_redis = MagicMock()
-        mock_redis.get.return_value = None
+        mock_redis.get = AsyncMock(return_value=None)
         mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(return_value=None)
         mock_redis.pipeline.return_value = mock_pipe
         mock_get_redis.return_value = mock_redis
 
         middleware = GlobalRateLimitMiddleware(app=MagicMock())
-        allowed, retry_after = middleware._check("user:123", "global_r", 600)
+        allowed, retry_after = await middleware._check("user:123", "global_r", 600)
 
         assert allowed is True
         assert retry_after == 0
 
-    @patch("apps.api.middleware.global_rate_limit.get_redis")
-    def test_check_blocks_over_limit(self, mock_get_redis):
+    @pytest.mark.asyncio
+    @patch("apps.api.middleware.global_rate_limit._get_redis")
+    async def test_check_blocks_over_limit(self, mock_get_redis):
         from apps.api.middleware.global_rate_limit import GlobalRateLimitMiddleware
 
         mock_redis = MagicMock()
-        mock_redis.get.return_value = "600"
-        mock_redis.ttl.return_value = 25
+        mock_redis.get = AsyncMock(return_value="600")
+        mock_redis.ttl = AsyncMock(return_value=25)
         mock_get_redis.return_value = mock_redis
 
         middleware = GlobalRateLimitMiddleware(app=MagicMock())
-        allowed, retry_after = middleware._check("user:123", "global_r", 600)
+        allowed, retry_after = await middleware._check("user:123", "global_r", 600)
 
         assert allowed is False
         assert retry_after == 25
