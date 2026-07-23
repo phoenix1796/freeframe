@@ -35,13 +35,17 @@ def _committed_media_sum(db: Session):
 def instance_storage_used_bytes(db: Session) -> int:
     """Instance-wide committed storage in bytes — the single source of truth for both the
     member GET indicator and cap enforcement."""
-    return _committed_media_sum(db).scalar() or 0
+    # Postgres SUM() over a bigint column returns numeric, which psycopg2/SQLAlchemy
+    # hand back as Decimal — cast to int to match the declared return type (the schema
+    # field this feeds, InstanceSettingsOut.storage_used_bytes, is `int`; an uncast
+    # Decimal there is what raised the "Expected int but got Decimal" Pydantic warning).
+    return int(_committed_media_sum(db).scalar() or 0)
 
 
 def project_storage_used_bytes(db: Session, project_id) -> int:
     """Committed storage in bytes for a single project — same semantics as the instance-wide
     figure, so per-project and instance usage agree."""
-    return _committed_media_sum(db).filter(Asset.project_id == project_id).scalar() or 0
+    return int(_committed_media_sum(db).filter(Asset.project_id == project_id).scalar() or 0)
 
 
 def storage_cap_error(db: Session, incoming_bytes: int) -> str | None:

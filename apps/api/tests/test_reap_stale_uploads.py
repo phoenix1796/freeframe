@@ -1,8 +1,25 @@
 """Tests for the stale-upload reaper and its S3 helpers."""
+import json
 from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock
 
 from apps.api.services import s3_service
+
+
+def _fake_s5cmd_run(returncode=0, stdout="", stderr=""):
+    """A subprocess.run stand-in that records every invocation's argv."""
+    calls = []
+
+    def run(cmd, **kwargs):
+        calls.append(cmd)
+        mock = MagicMock()
+        mock.returncode = returncode
+        mock.stdout = stdout
+        mock.stderr = stderr
+        return mock
+
+    run.calls = calls
+    return run
 
 
 def test_list_stale_multipart_uploads_filters_by_initiated(monkeypatch):
@@ -21,22 +38,61 @@ def test_list_stale_multipart_uploads_filters_by_initiated(monkeypatch):
 
 
 def test_delete_prefix_deletes_all_listed(monkeypatch):
-    fake = MagicMock()
-    fake.list_objects_v2.return_value = {
-        "Contents": [{"Key": "p/a"}, {"Key": "p/b"}], "IsTruncated": False,
-    }
-    monkeypatch.setattr(s3_service, "get_s3_client", lambda: fake)
+    """delete_prefix shells out to `s5cmd rm` against the prefix wildcard (see
+    perf(s3) commit) instead of boto3's list+batch-delete."""
+    fake_run = _fake_s5cmd_run(returncode=0, stdout="")
+    monkeypatch.setattr(s3_service.subprocess, "run", fake_run)
     s3_service.delete_prefix("p/")
-    _, kwargs = fake.delete_objects.call_args
-    assert kwargs["Delete"]["Objects"] == [{"Key": "p/a"}, {"Key": "p/b"}]
+    assert len(fake_run.calls) == 1
+    cmd = fake_run.calls[0]
+    assert cmd[0] == "s5cmd"
+    assert cmd[-2] == "rm"
+    assert cmd[-1] == f"s3://{s3_service.settings.s3_bucket}/p/*"
 
 
 def test_delete_prefix_noop_when_empty(monkeypatch):
-    fake = MagicMock()
-    fake.list_objects_v2.return_value = {"Contents": [], "IsTruncated": False}
-    monkeypatch.setattr(s3_service, "get_s3_client", lambda: fake)
-    s3_service.delete_prefix("p/")
-    fake.delete_objects.assert_not_called()
+    """s5cmd exits 1 with "no object found" on a prefix matching nothing —
+    delete_prefix must swallow that as a no-op, not raise (allow_no_match)."""
+    fake_run = _fake_s5cmd_run(
+        returncode=1, stderr='ERROR "rm s3://freeframe-test/p/*": no object found',
+    )
+    monkeypatch.setattr(s3_service.subprocess, "run", fake_run)
+    s3_service.delete_prefix("p/")  # must not raise
+    assert len(fake_run.calls) == 1
+
+
+def test_list_keys_yields_key_last_modified_size(monkeypatch):
+    """list_keys parses s5cmd's --json ls output into (key, last_modified, size)
+    tuples, stripping the s3://bucket/ prefix back to a bare key."""
+    bucket = s3_service.settings.s3_bucket
+    ndjson = "\n".join([
+        json.dumps({
+            "key": f"s3://{bucket}/raw/a.mp4", "type": "file",
+            "last_modified": "2026-07-23T02:05:15.656Z", "size": 289092060,
+        }),
+        json.dumps({
+            "key": f"s3://{bucket}/raw/sub/", "type": "dir",
+            "last_modified": "2026-07-23T02:05:15.656Z", "size": 0,
+        }),
+    ])
+    fake_run = _fake_s5cmd_run(returncode=0, stdout=ndjson)
+    monkeypatch.setattr(s3_service.subprocess, "run", fake_run)
+
+    result = list(s3_service.list_keys("raw/"))
+
+    assert len(result) == 1  # the "dir" entry is skipped, only files yielded
+    key, last_modified, size = result[0]
+    assert key == "raw/a.mp4"
+    assert size == 289092060
+    assert last_modified == datetime(2026, 7, 23, 2, 5, 15, 656000, tzinfo=timezone.utc)
+
+
+def test_list_keys_empty_when_no_match(monkeypatch):
+    fake_run = _fake_s5cmd_run(
+        returncode=1, stderr='ERROR "ls s3://freeframe-test/raw/*": no object found',
+    )
+    monkeypatch.setattr(s3_service.subprocess, "run", fake_run)
+    assert list(s3_service.list_keys("raw/")) == []
 
 
 import uuid

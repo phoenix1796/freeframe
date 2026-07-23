@@ -61,25 +61,21 @@ def test_run_uses_errors_replace():
 def test_transcode_with_audio_includes_audio_map():
     """When ffprobe detects audio streams, ffmpeg cmd must include -map a:0."""
     def mock_run_side_effect(cmd, **_kwargs):
-        # First call: video probe → return metadata
-        if "-select_streams" in cmd and cmd[cmd.index("-select_streams") + 1] == "v:0":
+        # First call: the single merged ffprobe (-show_streams -show_format, no
+        # -select_streams — see the perf(transcode) commit) → video + audio streams
+        if cmd[0] == "ffprobe":
             mock = MagicMock()
             mock.returncode = 0
             mock.stderr = ""
             mock.stdout = json.dumps({
-                "streams": [{"r_frame_rate": "30/1", "duration": 10.0, "width": 1920, "height": 1080}],
+                "streams": [
+                    {"codec_type": "video", "r_frame_rate": "30/1", "duration": 10.0, "width": 1920, "height": 1080},
+                    {"codec_type": "audio"},
+                ],
+                "format": {"duration": "10.0"},
             })
             return mock
-        # Second call: audio probe → return audio stream
-        if "-select_streams" in cmd and cmd[cmd.index("-select_streams") + 1] == "a":
-            mock = MagicMock()
-            mock.returncode = 0
-            mock.stderr = ""
-            mock.stdout = json.dumps({
-                "streams": [{"codec_type": "audio"}],
-            })
-            return mock
-        # Third call: main ffmpeg transcode
+        # Later calls: main ffmpeg transcode, thumbnail ffmpeg, s5cmd upload
         mock = MagicMock()
         mock.returncode = 0
         mock.stderr = ""
@@ -123,23 +119,19 @@ def test_transcode_with_audio_includes_audio_map():
 def test_transcode_without_audio_excludes_audio_map():
     """When ffprobe detects no audio streams, ffmpeg cmd must NOT include -map a:0."""
     def mock_run_side_effect(cmd, **_kwargs):
-        # First call: video probe
-        if "-select_streams" in cmd and cmd[cmd.index("-select_streams") + 1] == "v:0":
+        # First call: the single merged ffprobe → video stream only, no audio
+        if cmd[0] == "ffprobe":
             mock = MagicMock()
             mock.returncode = 0
             mock.stderr = ""
             mock.stdout = json.dumps({
-                "streams": [{"r_frame_rate": "30/1", "duration": 10.0, "width": 1920, "height": 1080}],
+                "streams": [
+                    {"codec_type": "video", "r_frame_rate": "30/1", "duration": 10.0, "width": 1920, "height": 1080},
+                ],
+                "format": {"duration": "10.0"},
             })
             return mock
-        # Second call: audio probe → NO audio streams
-        if "-select_streams" in cmd and cmd[cmd.index("-select_streams") + 1] == "a":
-            mock = MagicMock()
-            mock.returncode = 0
-            mock.stderr = ""
-            mock.stdout = json.dumps({"streams": []})
-            return mock
-        # Third call: main ffmpeg transcode
+        # Later calls: main ffmpeg transcode, thumbnail ffmpeg, s5cmd upload
         mock = MagicMock()
         mock.returncode = 0
         mock.stderr = ""
@@ -191,18 +183,21 @@ def test_run_returns_stdout():
 
 def test_transcode_returns_probe_metadata():
     t = FFmpegTranscoder(MagicMock(), "bucket")
-    video_probe = json.dumps({
-        "streams": [{"r_frame_rate": "25/1", "width": 1920, "height": 1080, "duration": "8.0"}],
+    # The single merged ffprobe call (-show_streams -show_format, no -select_streams)
+    # returns every stream unfiltered; transcode() picks the video-type one itself
+    # before handing off to parse_probe_metadata (see the perf(transcode) commit).
+    combined_probe = json.dumps({
+        "streams": [{"codec_type": "video", "r_frame_rate": "25/1", "width": 1920, "height": 1080, "duration": "8.0"}],
         "format": {"duration": "8.0"},
     })
-    audio_probe = json.dumps({"streams": []})
 
     def fake_run(cmd, timeout=None, label="ffmpeg"):
         if label == "ffprobe":
-            return video_probe if "v:0" in cmd else audio_probe
+            return combined_probe
         return ""
 
     with patch.object(FFmpegTranscoder, "_run", side_effect=fake_run), \
+         patch.object(FFmpegTranscoder, "_run_s5cmd", return_value=""), \
          patch.object(FFmpegTranscoder, "_get_presigned_url", return_value="http://in"):
         result = asyncio.run(t.transcode(_make_job()))
 
