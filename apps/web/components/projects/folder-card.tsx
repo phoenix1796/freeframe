@@ -1,81 +1,11 @@
 'use client'
 
 import React, { useCallback, useState } from 'react'
-import useSWR from 'swr'
-import { Folder, Film, Music, Image as ImageIcon, Images, MoreHorizontal, Pencil, Trash, Share2 } from 'lucide-react'
+import { Folder, MoreHorizontal, Pencil, Trash, Share2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { api } from '@/lib/api'
 import { NameDialog } from './name-dialog'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
-import type { Folder as FolderType, AssetResponse } from '@/types'
-
-const assetTypeIcons = {
-  video: Film,
-  audio: Music,
-  image: ImageIcon,
-  image_carousel: Images,
-} as const
-
-function ThumbCell({ asset, className }: { asset: AssetResponse; className?: string }) {
-  const [failed, setFailed] = React.useState(false)
-  const TypeIcon = assetTypeIcons[asset.asset_type as keyof typeof assetTypeIcons] ?? ImageIcon
-
-  if (failed || !asset.thumbnail_url) {
-    return (
-      <div className={cn('overflow-hidden bg-bg-tertiary flex items-center justify-center', className)}>
-        <TypeIcon className="h-6 w-6 text-text-tertiary/50" />
-      </div>
-    )
-  }
-
-  return (
-    <div className={cn('overflow-hidden bg-bg-tertiary', className)}>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={asset.thumbnail_url}
-        alt={asset.name}
-        onError={() => setFailed(true)}
-        className="h-full w-full object-cover"
-      />
-    </div>
-  )
-}
-
-function FolderThumbnails({ projectId, folderId, itemCount }: { projectId: string; folderId: string; itemCount: number }) {
-  const { data: assets } = useSWR<AssetResponse[]>(
-    itemCount > 0 ? `/projects/${projectId}/assets?folder_id=${folderId}` : null,
-    (key: string) => api.get<AssetResponse[]>(key),
-    { revalidateOnFocus: false },
-  )
-
-  // Prefer assets with thumbnails first, fill with any up to 3
-  const sorted = (assets ?? []).sort((a, b) => (b.thumbnail_url ? 1 : 0) - (a.thumbnail_url ? 1 : 0))
-  const thumbs = sorted.slice(0, 3)
-
-  if (thumbs.length === 0) {
-    return (
-      <div className="aspect-[4/3] flex items-center justify-center bg-bg-tertiary rounded-t-lg">
-        <Folder className="h-12 w-12 text-text-tertiary/50" />
-      </div>
-    )
-  }
-
-  return (
-    <div className={cn(
-      'aspect-[4/3] rounded-t-lg overflow-hidden grid gap-px bg-bg-tertiary',
-      thumbs.length === 1 && 'grid-cols-1',
-      thumbs.length >= 2 && 'grid-cols-2',
-    )}>
-      {thumbs.map((asset, i) => (
-        <ThumbCell
-          key={asset.id}
-          asset={asset}
-          className={thumbs.length === 3 && i === 0 ? 'row-span-2' : undefined}
-        />
-      ))}
-    </div>
-  )
-}
+import type { Folder as FolderType } from '@/types'
 
 interface FolderCardProps {
   folder: FolderType
@@ -153,9 +83,9 @@ export function FolderCard({
     <>
       <div
         className={cn(
-          'group relative rounded-lg border bg-bg-tertiary/50 cursor-pointer transition-all hover:border-border-focus hover:scale-[1.01]',
-          selected ? 'ring-2 ring-accent border-accent/50' : 'border-border',
-          isDragOver && 'ring-2 ring-accent/50 bg-accent/5',
+          'group relative flex flex-col items-center rounded-lg p-3 cursor-pointer transition-colors hover:bg-bg-hover',
+          selected && 'bg-accent/10',
+          isDragOver && 'bg-accent/10 ring-2 ring-accent/50',
           menuOpen && 'z-[60]',
           className,
         )}
@@ -167,70 +97,71 @@ export function FolderCard({
         onDoubleClick={() => onOpen(folder)}
         onClick={() => onOpen(folder)}
       >
-        {/* Folder thumbnail preview */}
-        <FolderThumbnails projectId={folder.project_id} folderId={folder.id} itemCount={folder.item_count} />
+        {/* Folder icon — Finder-style: the icon alone signals "folder", no
+            content preview, so it never gets confused with an asset card. */}
+        <Folder
+          className="h-16 w-16 text-accent shrink-0"
+          fill="currentColor"
+          fillOpacity={0.18}
+          strokeWidth={1.5}
+        />
 
-        {/* Folder badge — content-derived thumbnails (e.g. a folder holding a
-            single video) would otherwise look identical to that asset's own
-            card, with nothing marking this as a folder. */}
-        <div className="absolute top-2 left-2 flex h-6 w-6 items-center justify-center rounded-md bg-black/60 backdrop-blur-sm">
-          <Folder className="h-3.5 w-3.5 text-white" />
+        {/* Name + item count — outside/below the icon, not inside a card */}
+        <div className="mt-1 flex flex-col items-center gap-0.5 max-w-full">
+          <p className="text-sm font-medium text-text-primary text-center truncate max-w-full px-1">
+            {folder.name}
+          </p>
+          <p className="text-xs text-text-tertiary">
+            {folder.item_count} {folder.item_count === 1 ? 'item' : 'items'}
+          </p>
         </div>
 
-        {/* Info */}
-        <div className="px-3 py-2">
-          <div className="flex items-start justify-between gap-1">
-            <p className="text-sm font-medium text-text-primary truncate">{folder.name}</p>
-            <div className="relative" ref={menuRef}>
+        {/* Menu — top-right, appears on hover (matches the icon-view layout) */}
+        <div className="absolute right-1 top-1" ref={menuRef}>
+          <button
+            className="opacity-0 group-hover:opacity-100 flex items-center justify-center h-6 w-6 rounded hover:bg-bg-hover transition-opacity shrink-0"
+            onClick={(e) => {
+              e.stopPropagation()
+              setMenuOpen((p) => !p)
+            }}
+          >
+            <MoreHorizontal className="h-3.5 w-3.5 text-text-tertiary" />
+          </button>
+
+          {menuOpen && (
+            <div className="absolute right-0 top-full mt-1 z-50 w-40 rounded-lg border border-border bg-bg-elevated shadow-xl py-1">
               <button
-                className="opacity-0 group-hover:opacity-100 flex items-center justify-center h-6 w-6 rounded hover:bg-bg-hover transition-opacity shrink-0"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-hover"
                 onClick={(e) => {
                   e.stopPropagation()
-                  setMenuOpen((p) => !p)
+                  setMenuOpen(false)
+                  setRenameOpen(true)
                 }}
               >
-                <MoreHorizontal className="h-3.5 w-3.5 text-text-tertiary" />
+                <Pencil className="h-3 w-3" /> Rename
               </button>
-
-              {menuOpen && (
-                <div className="absolute right-0 top-full mt-1 z-50 w-40 rounded-lg border border-border bg-bg-elevated shadow-xl py-1">
-                  <button
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-hover"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setMenuOpen(false)
-                      setRenameOpen(true)
-                    }}
-                  >
-                    <Pencil className="h-3 w-3" /> Rename
-                  </button>
-                  <button
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-hover"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setMenuOpen(false)
-                      onShare?.(folder.id, folder.name)
-                    }}
-                  >
-                    <Share2 className="h-3 w-3" /> Share
-                  </button>
-                  <button
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setMenuOpen(false)
-                      setDeleteOpen(true)
-                    }}
-                  >
-                    <Trash className="h-3 w-3" /> Delete
-                  </button>
-                </div>
-              )}
+              <button
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-hover"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setMenuOpen(false)
+                  onShare?.(folder.id, folder.name)
+                }}
+              >
+                <Share2 className="h-3 w-3" /> Share
+              </button>
+              <button
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setMenuOpen(false)
+                  setDeleteOpen(true)
+                }}
+              >
+                <Trash className="h-3 w-3" /> Delete
+              </button>
             </div>
-          </div>
-          <p className="text-xs text-text-tertiary mt-0.5">
-            {folder.item_count} {folder.item_count === 1 ? 'Item' : 'Items'}
-          </p>
+          )}
         </div>
       </div>
 

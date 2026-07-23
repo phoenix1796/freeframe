@@ -272,7 +272,9 @@ export function AssetGrid({
               {folders!.length} {folders!.length === 1 ? 'Folder' : 'Folders'}
             </span>
           </div>
-          <div className={cn('grid gap-3', gridColsMap[cardSize])}>
+          {/* Folders are fixed-size icons (Finder-style), not scaled preview
+              cards — always dense, independent of the asset card-size setting. */}
+          <div className="grid grid-cols-3 gap-1 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10">
             {folders!.map((folder) => {
               const isFolderSelected = selectedFolderIds.has(folder.id)
               return (
@@ -404,7 +406,7 @@ export function AssetGrid({
               >
                 {/* Folder icon with checkbox overlay — aligned with asset thumbnail */}
                 <div className="relative h-10 w-10 shrink-0 rounded-md bg-bg-tertiary flex items-center justify-center overflow-hidden">
-                  <FolderIcon className="h-5 w-5 text-text-tertiary/60" />
+                  <FolderIcon className="h-6 w-6 text-accent" fill="currentColor" fillOpacity={0.18} strokeWidth={1.5} />
                   <button
                     className={cn(
                       'absolute inset-0 flex items-center justify-center transition-all',
