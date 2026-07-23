@@ -60,7 +60,7 @@ export function Header({ onSearchOpen }: HeaderProps) {
   const breadcrumbs = [...urlCrumbs, ...extraCrumbs.map((c) => ({ label: c.label, href: c.href ?? '' }))]
 
   return (
-    <header className="sticky top-0 z-20 flex h-11 items-center justify-between border-b border-border bg-bg-primary/90 backdrop-blur-sm px-4">
+    <header className="sticky top-0 z-20 flex h-11 items-center justify-between border-b border-border bg-bg-primary/90 backdrop-blur-sm px-6">
       {/* Breadcrumbs */}
       <nav className="flex items-center gap-1 text-[13px]">
         {breadcrumbs.map((crumb, index) => {

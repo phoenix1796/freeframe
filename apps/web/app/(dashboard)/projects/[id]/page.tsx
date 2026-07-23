@@ -595,7 +595,7 @@ export default function ProjectDetailPage() {
         className="flex-1 flex flex-col min-w-0 bg-bg-primary h-full overflow-y-auto"
         onClick={() => setSelectedAsset(null)}
       >
-        <div className="px-5 pt-3 pb-6 space-y-3">
+        <div className="px-6 pt-3 pb-6 space-y-3">
           {/* Asset grid, Share links, or Trash view */}
           {showShareLinks && !selectedShareLink ? (
             <ShareLinksTable

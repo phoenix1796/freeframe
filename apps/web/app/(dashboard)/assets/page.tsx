@@ -71,7 +71,7 @@ export default function AssetsPage() {
       </div>
 
       {/* Main content */}
-      <div className="flex-1 overflow-y-auto p-5">
+      <div className="flex-1 overflow-y-auto p-6">
         {/* Header row */}
         <div className="mb-5">
           <h1 className="text-base font-semibold text-text-primary">
