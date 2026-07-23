@@ -9,6 +9,7 @@ import { AnnotationCanvas } from '@/components/review/annotation-canvas'
 import { AnnotationOverlay } from '@/components/review/annotation-overlay'
 import { CommentPanel } from '@/components/review/comment-panel'
 import { CommentInput } from '@/components/review/comment-input'
+import { TranscriptPanel } from '@/components/review/transcript-panel'
 // ApprovalBar removed for now
 import { VersionSwitcher } from '@/components/review/version-switcher'
 import { ShareDialog } from '@/components/review/share-dialog'
@@ -18,6 +19,7 @@ import { useComments } from '@/hooks/use-comments'
 import { useSSE } from '@/hooks/use-sse'
 import { api } from '@/lib/api'
 import { useUploadStore } from '@/stores/upload-store'
+import { UploadDialog } from '@/components/upload/upload-dialog'
 import { useBreadcrumbStore } from '@/stores/breadcrumb-store'
 import { canCompare } from '@/lib/compare-time'
 import {
@@ -82,7 +84,9 @@ function ReviewScreenInner({ projectId }: { projectId: string }) {
   const setLabel = useBreadcrumbStore((s) => s.setLabel)
   usePageTitle(asset?.name ?? null)
   const [annotationData, setAnnotationData] = useState<Record<string, unknown> | null>(null)
-  const [activeTab, setActiveTab] = useState<'comments' | 'fields'>('comments')
+  const [activeTab, setActiveTab] = useState<'comments' | 'fields' | 'transcript'>('comments')
+  const [versionUploadOpen, setVersionUploadOpen] = useState(false)
+  const [pendingVersionFiles, setPendingVersionFiles] = useState<File[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const deepLinkApplied = useRef(false)
 
@@ -259,6 +263,18 @@ function ReviewScreenInner({ projectId }: { projectId: string }) {
     refetchComments()
   }
 
+  const handleStartVersionUpload = () => {
+    const file = pendingVersionFiles[0]
+    if (!file || !asset) return
+    startVersionUpload(file, asset.id, asset.name, asset.project_id)
+    // Surface the newly-created version (starts as "uploading") quickly;
+    // SSE transcode events then drive it through processing → ready (#118).
+    setTimeout(() => refetchVersions(), 800)
+    setTimeout(() => refetchVersions(), 2500)
+    setPendingVersionFiles([])
+    setVersionUploadOpen(false)
+  }
+
   const versionReady = currentVersion?.processing_status === 'ready'
   const versionProcessing =
     currentVersion?.processing_status === 'processing' ||
@@ -410,22 +426,34 @@ function ReviewScreenInner({ projectId }: { projectId: string }) {
 
         {/* Right: version, share, sidebar toggle */}
         <div className="flex items-center gap-2 shrink-0 flex-1 justify-end">
-          {/* Hidden file input for new version upload */}
+          {/* Hidden file input for new version upload — picking a file opens
+              the shared upload dialog for confirmation rather than uploading
+              instantly, same as the new-asset flow. */}
           <input
             ref={versionFileInputRef}
             type="file"
             className="hidden"
             accept={acceptByType[asset.asset_type] ?? '*/*'}
-            onChange={async (e) => {
+            onChange={(e) => {
               const file = e.target.files?.[0]
-              if (!file || !asset) return
-              startVersionUpload(file, asset.id, asset.name, asset.project_id)
+              if (!file) return
+              setPendingVersionFiles([file])
+              setVersionUploadOpen(true)
               e.target.value = ''
-              // Surface the newly-created version (starts as "uploading") quickly;
-              // SSE transcode events then drive it through processing → ready (#118).
-              setTimeout(() => refetchVersions(), 800)
-              setTimeout(() => refetchVersions(), 2500)
             }}
+          />
+          <UploadDialog
+            open={versionUploadOpen}
+            onOpenChange={(open) => {
+              setVersionUploadOpen(open)
+              if (!open) setPendingVersionFiles([])
+            }}
+            title="Upload new version"
+            description={`Add a new version of "${asset.name}".`}
+            pendingFiles={pendingVersionFiles}
+            onFilesSelected={(files) => setPendingVersionFiles(files.slice(0, 1))}
+            onChangeFiles={() => setPendingVersionFiles([])}
+            onStartUpload={handleStartVersionUpload}
           />
           <VersionSwitcher versions={versions} />
           {asset && canCompare(asset.asset_type, versions) && (
@@ -513,6 +541,19 @@ function ReviewScreenInner({ projectId }: { projectId: string }) {
                 >
                   Fields
                 </button>
+                {(asset.asset_type === 'video' || asset.asset_type === 'audio') && (
+                  <button
+                    onClick={() => setActiveTab('transcript')}
+                    className={cn(
+                      'flex-1 py-1.5 text-[13px] font-medium rounded-md transition-all',
+                      activeTab === 'transcript'
+                        ? 'bg-bg-hover text-text-primary shadow-sm'
+                        : 'text-text-tertiary hover:text-text-secondary',
+                    )}
+                  >
+                    Transcript
+                  </button>
+                )}
               </div>
             </div>
 
@@ -540,7 +581,7 @@ function ReviewScreenInner({ projectId }: { projectId: string }) {
                     />
                   )}
                 </>
-              ) : (
+              ) : activeTab === 'fields' ? (
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
@@ -573,6 +614,13 @@ function ReviewScreenInner({ projectId }: { projectId: string }) {
                     )}
                   </div>
                 </div>
+              ) : (
+                <TranscriptPanel
+                  assetId={asset.id}
+                  versionId={currentVersion?.id ?? null}
+                  transcriptRequested={currentVersion?.transcript_requested ?? false}
+                  isOwner={currentRole === 'owner'}
+                />
               )}
             </div>
           </div>

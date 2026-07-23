@@ -133,6 +133,7 @@ export interface AssetVersion {
   asset_id: string;
   version_number: number;
   processing_status: AssetVersionStatus;
+  transcript_requested?: boolean;
   created_by: string;
   created_at: string;
   deleted_at: string | null;

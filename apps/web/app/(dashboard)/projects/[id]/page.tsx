@@ -4,7 +4,6 @@ import * as React from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import useSWR from "swr";
 import Link from "next/link";
-import * as Dialog from "@radix-ui/react-dialog";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
   Upload,
@@ -28,11 +27,10 @@ import {
 import { cn, formatRelativeTime, formatBytes } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Avatar } from "@/components/shared/avatar";
 import { AssetGrid } from "@/components/projects/asset-grid";
 import { CommentPanel } from "@/components/review/comment-panel";
-import { UploadZone } from "@/components/upload/upload-zone";
+import { UploadDialog } from "@/components/upload/upload-dialog";
 import { useUploadStore } from "@/stores/upload-store";
 import { useAuthStore } from "@/stores/auth-store";
 import { useViewStore } from "@/stores/view-store";
@@ -852,68 +850,18 @@ export default function ProjectDetailPage() {
           )}
 
           {/* Upload dialog */}
-          <Dialog.Root open={uploadOpen} onOpenChange={setUploadOpen}>
-            <Dialog.Portal>
-              <Dialog.Overlay className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
-              <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-bg-secondary p-6 shadow-xl data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95">
-                <Dialog.Close className="absolute right-4 top-4 text-text-tertiary hover:text-text-primary transition-colors">
-                  <X className="h-4 w-4" />
-                </Dialog.Close>
-                <Dialog.Title className="text-base font-semibold text-text-primary">
-                  Upload asset
-                </Dialog.Title>
-                <Dialog.Description className="mt-1 text-sm text-text-secondary">
-                  Add new media to this project.
-                </Dialog.Description>
-                <div className="mt-4 space-y-4">
-                  {pendingFiles.length === 0 ? (
-                    <UploadZone onFilesSelected={handleFilesSelected} />
-                  ) : (
-                    <>
-                      <div className="rounded-lg border border-border bg-bg-tertiary">
-                        <div className="px-3 py-2 text-xs font-medium text-text-tertiary border-b border-border">
-                          {pendingFiles.length} file{pendingFiles.length !== 1 ? "s" : ""} selected
-                        </div>
-                        <div className="max-h-40 overflow-y-auto divide-y divide-border">
-                          {pendingFiles.map((f, i) => (
-                            <div key={i} className="flex items-center justify-between px-3 py-1.5">
-                              <span className="text-sm text-text-primary truncate mr-2">{f.name}</span>
-                              <span className="text-xs text-text-tertiary shrink-0">
-                                {f.size < 1024 * 1024
-                                  ? `${(f.size / 1024).toFixed(0)} KB`
-                                  : `${(f.size / (1024 * 1024)).toFixed(1)} MB`}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                      {pendingFiles.length === 1 && (
-                        <Input
-                          label="Asset name"
-                          value={assetName}
-                          onChange={(e) => setAssetName(e.target.value)}
-                          placeholder="e.g. Hero Video Final"
-                        />
-                      )}
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => setPendingFiles([])}
-                        >
-                          Change files
-                        </Button>
-                        <Button size="sm" onClick={handleStartUpload}>
-                          Start upload
-                        </Button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </Dialog.Content>
-            </Dialog.Portal>
-          </Dialog.Root>
+          <UploadDialog
+            open={uploadOpen}
+            onOpenChange={setUploadOpen}
+            title="Upload asset"
+            description="Add new media to this project."
+            pendingFiles={pendingFiles}
+            onFilesSelected={handleFilesSelected}
+            onChangeFiles={() => setPendingFiles([])}
+            onStartUpload={handleStartUpload}
+            assetName={assetName}
+            onAssetNameChange={setAssetName}
+          />
         </div>
       </div>
 
