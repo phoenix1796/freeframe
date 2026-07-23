@@ -478,8 +478,9 @@ function ReviewScreenInner({ projectId }: { projectId: string }) {
         <CompareOverlay asset={asset} versions={versions} rightVersion={currentVersion} onClose={closeCompare} canComment={canComment} />
       ) : (
       <div className="flex flex-1 overflow-hidden min-h-0">
-        {/* Left: viewer column */}
-        <div className="flex-1 flex flex-col bg-bg-primary overflow-hidden min-w-0">
+        {/* Left: viewer column — px-3 so the player has breathing room instead
+            of its black canvas sliding flush into the sidebar/comments panel */}
+        <div className="flex-1 flex flex-col bg-bg-primary overflow-hidden min-w-0 px-3">
           {/* Media viewer */}
           {renderMediaViewer()}
         </div>
