@@ -81,7 +81,6 @@ interface FolderCardProps {
   folder: FolderType
   selected?: boolean
   onOpen: (folder: FolderType) => void
-  onSelect?: (e: React.MouseEvent) => void
   onRename?: (folderId: string, name: string) => Promise<void>
   onDelete?: (folderId: string) => Promise<void>
   onShare?: (folderId: string, folderName: string) => Promise<void>
@@ -93,7 +92,6 @@ export function FolderCard({
   folder,
   selected,
   onOpen,
-  onSelect,
   onRename,
   onDelete,
   onShare,
@@ -167,7 +165,7 @@ export function FolderCard({
         onDragLeave={() => setIsDragOver(false)}
         onDrop={handleDrop}
         onDoubleClick={() => onOpen(folder)}
-        onClick={onSelect}
+        onClick={() => onOpen(folder)}
       >
         {/* Folder thumbnail preview */}
         <FolderThumbnails projectId={folder.project_id} folderId={folder.id} itemCount={folder.item_count} />
