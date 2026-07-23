@@ -4,7 +4,6 @@ import * as React from 'react'
 import useSWR from 'swr'
 import { FileText, Loader2, AlertCircle } from 'lucide-react'
 import { api } from '@/lib/api'
-import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { useReviewStore } from '@/stores/review-store'
 
@@ -12,6 +11,46 @@ interface TranscriptWord {
   text: string
   start: number
   end: number
+  speaker?: string | null
+}
+
+interface TranscriptTurn {
+  speaker: string | null
+  start: number
+  words: TranscriptWord[]
+}
+
+const SPEAKER_COLORS = ['#f59e0b', '#38bdf8', '#a78bfa', '#4ade80', '#fb7185', '#facc15']
+
+function speakerColor(speaker: string): string {
+  // AssemblyAI labels speakers "A", "B", "C"... — index directly off the
+  // char code rather than hashing, since the label set is small/ordered.
+  const index = speaker.toUpperCase().charCodeAt(0) - 65
+  return SPEAKER_COLORS[((index % SPEAKER_COLORS.length) + SPEAKER_COLORS.length) % SPEAKER_COLORS.length]
+}
+
+/** Group consecutive same-speaker words into turns, so diarized transcripts
+ * read as a conversation instead of one undifferentiated wall of text. When
+ * the provider didn't return speaker labels at all, this collapses to a
+ * single turn and no speaker header shows. */
+function groupIntoTurns(words: TranscriptWord[]): TranscriptTurn[] {
+  const turns: TranscriptTurn[] = []
+  for (const w of words) {
+    const speaker = w.speaker ?? null
+    const last = turns[turns.length - 1]
+    if (last && last.speaker === speaker) {
+      last.words.push(w)
+    } else {
+      turns.push({ speaker, start: w.start, words: [w] })
+    }
+  }
+  return turns
+}
+
+function formatTimestamp(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  const s = Math.floor(seconds % 60)
+  return `${m}:${String(s).padStart(2, '0')}`
 }
 
 interface TranscriptUrlData {
@@ -156,18 +195,40 @@ export function TranscriptPanel({ assetId, versionId, transcriptRequested, isOwn
     return <EmptyState text="Transcript came back empty." />
   }
 
+  const turns = groupIntoTurns(transcript.words)
+  const hasSpeakers = turns.some((t) => t.speaker !== null)
+
   return (
-    <div className="flex-1 overflow-y-auto p-4 text-[13px] leading-relaxed text-text-secondary">
-      {transcript.words.map((w, i) => (
-        <span
-          key={i}
-          onClick={() => seekTo(w.start, false)}
-          className={cn(
-            'cursor-pointer rounded px-0.5 transition-colors hover:bg-accent/15 hover:text-text-primary',
+    <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      {turns.map((turn, ti) => (
+        <div key={ti}>
+          {hasSpeakers && (
+            <div
+              className="mb-1 flex items-center gap-2 text-xs font-medium cursor-pointer"
+              onClick={() => seekTo(turn.start, false)}
+            >
+              <span
+                className="h-2 w-2 rounded-full shrink-0"
+                style={{ backgroundColor: turn.speaker ? speakerColor(turn.speaker) : undefined }}
+              />
+              <span className="text-text-primary">
+                {turn.speaker ? `Speaker ${turn.speaker}` : 'Unknown speaker'}
+              </span>
+              <span className="text-text-tertiary">{formatTimestamp(turn.start)}</span>
+            </div>
           )}
-        >
-          {w.text}{' '}
-        </span>
+          <p className="text-[13px] leading-relaxed text-text-secondary">
+            {turn.words.map((w, wi) => (
+              <span
+                key={wi}
+                onClick={() => seekTo(w.start, false)}
+                className="cursor-pointer rounded px-0.5 transition-colors hover:bg-accent/15 hover:text-text-primary"
+              >
+                {w.text}{' '}
+              </span>
+            ))}
+          </p>
+        </div>
       ))}
     </div>
   )

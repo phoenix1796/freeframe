@@ -41,8 +41,8 @@ def test_assemblyai_happy_path_converts_ms_to_seconds(mock_settings):
     poll_response.json.return_value = {
         "status": "completed",
         "words": [
-            {"text": "Hello", "start": 340, "end": 620, "confidence": 0.99},
-            {"text": "world", "start": 620, "end": 980, "confidence": 0.97},
+            {"text": "Hello", "start": 340, "end": 620, "confidence": 0.99, "speaker": "A"},
+            {"text": "world", "start": 620, "end": 980, "confidence": 0.97, "speaker": "A"},
         ],
     }
     poll_response.raise_for_status.return_value = None
@@ -57,12 +57,12 @@ def test_assemblyai_happy_path_converts_ms_to_seconds(mock_settings):
         words = transcribe_via_provider("https://example.com/audio.mp4")
 
     assert words == [
-        {"text": "Hello", "start": 0.34, "end": 0.62},
-        {"text": "world", "start": 0.62, "end": 0.98},
+        {"text": "Hello", "start": 0.34, "end": 0.62, "speaker": "A"},
+        {"text": "world", "start": 0.62, "end": 0.98, "speaker": "A"},
     ]
     mock_client.post.assert_called_once()
     call_kwargs = mock_client.post.call_args
-    assert call_kwargs.kwargs["json"] == {"audio_url": "https://example.com/audio.mp4"}
+    assert call_kwargs.kwargs["json"] == {"audio_url": "https://example.com/audio.mp4", "speaker_labels": True}
     assert call_kwargs.kwargs["headers"] == {"authorization": "test-key"}
 
 
