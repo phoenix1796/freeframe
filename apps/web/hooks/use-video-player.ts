@@ -76,6 +76,19 @@ export function useVideoPlayer(
   const hlsRef = useRef<Hls | null>(null)
   const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  // TEMP DEBUG (video-lag investigation, remove after diagnosis): a trace
+  // showed master.m3u8/playlist.m3u8/the first segment each fetched twice,
+  // ~1-14ms apart — consistent with the HLS-setup effect below tearing down
+  // and recreating the Hls instance for the same `src`. These track WHICH
+  // dependency actually changed on each run, and give each Hls instance an
+  // id so two live at once (or a same-src recreation) is visible in the
+  // console without guessing from network timing alone.
+  const hlsSetupDepsRef = useRef<{ src: string | null; setPlayheadTime: unknown }>({
+    src: null,
+    setPlayheadTime: null,
+  })
+  const hlsInstanceCounterRef = useRef(0)
+
   const { setPlayheadTime, seekTarget, setActiveAnnotation } = useReviewStore()
 
   const [isPlaying, setIsPlaying] = useState(false)
@@ -152,6 +165,18 @@ export function useVideoPlayer(
 
   // HLS + video element setup
   useEffect(() => {
+    // TEMP DEBUG — see hlsSetupDepsRef declaration above.
+    const changedDeps: string[] = []
+    if (hlsSetupDepsRef.current.src !== src) changedDeps.push('src')
+    if (hlsSetupDepsRef.current.setPlayheadTime !== setPlayheadTime) changedDeps.push('setPlayheadTime')
+    console.log('[HLS-DEBUG] setup effect running', {
+      src,
+      changedDeps,
+      prevSrc: hlsSetupDepsRef.current.src,
+      isFirstRun: hlsSetupDepsRef.current.src === null && hlsSetupDepsRef.current.setPlayheadTime === null,
+    })
+    hlsSetupDepsRef.current = { src, setPlayheadTime }
+
     const video = videoRef.current
     if (!video || !src) return
 
@@ -207,6 +232,12 @@ export function useVideoPlayer(
     const isHlsSource = src.includes('.m3u8')
 
     if (isHlsSource && Hls.isSupported()) {
+      hlsInstanceCounterRef.current += 1
+      const hlsInstanceId = hlsInstanceCounterRef.current
+      console.log(`[HLS-DEBUG] creating Hls instance #${hlsInstanceId}`, {
+        src,
+        priorInstanceStillLive: hlsRef.current !== null,
+      })
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
@@ -258,6 +289,7 @@ export function useVideoPlayer(
       video.removeEventListener('progress', onProgress)
 
       if (hlsRef.current) {
+        console.log('[HLS-DEBUG] cleanup — destroying Hls instance', { src })
         hlsRef.current.destroy()
         hlsRef.current = null
       }
