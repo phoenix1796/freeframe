@@ -9,6 +9,7 @@ import {
   Send,
   Smile,
   Clock,
+  ChevronsLeftRight,
   ChevronLeft,
   ChevronDown,
   MousePointer,
@@ -241,6 +242,11 @@ export function CommentInput({
   >("public");
   const [visDropdownOpen, setVisDropdownOpen] = React.useState(false);
   const [timecodeAttached, setTimecodeAttached] = React.useState(true);
+  // Range comments: set once the user marks an in-point, frozen at that
+  // playhead time. The out-point is deliberately NOT captured on click —
+  // it's whatever the playhead is at when they hit submit, so scrubbing
+  // forward while typing the comment is how you define the range's end.
+  const [rangeStart, setRangeStart] = React.useState<number | null>(null);
   const visRef = React.useRef<HTMLDivElement>(null);
 
   // Emoji picker state
@@ -334,11 +340,23 @@ export function CommentInput({
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Escape") setMentionQuery(null);
+    if (e.key === "Escape") {
+      setMentionQuery(null);
+      setRangeStart(null);
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
     }
+  }
+
+  function handleRangeToggle() {
+    if (rangeStart !== null) {
+      setRangeStart(null);
+      return;
+    }
+    setTimecodeAttached(true);
+    setRangeStart(playheadTime);
   }
 
   async function handleSubmit() {
@@ -395,17 +413,35 @@ export function CommentInput({
       // valid video time and must never be silently dropped), and is
       // force-attached whenever this submit carries a drawing: a drawing is
       // frame-anchored and must never save timecode-less on timed media.
-      const timecodeStart = resolveSubmitTimecode({
+      let timecodeStart = resolveSubmitTimecode({
         hasTimecode,
         timecodeAttached,
         hasAnnotation: !!finalAnnotation,
         playheadTime,
       });
+      let timecodeEnd: number | undefined = undefined;
+
+      // A marked range wins over the plain point timecode, unless this
+      // submit carries a drawing — a drawing is anchored to one frame, so a
+      // range alongside it wouldn't mean anything.
+      if (rangeStart !== null && !finalAnnotation) {
+        const start = Math.min(rangeStart, playheadTime);
+        const end = Math.max(rangeStart, playheadTime);
+        // Under ~3 frames of movement (at 24fps) isn't a deliberate range —
+        // treat it as a point instead of saving a sliver the progress bar
+        // would render as an invisible zero-width span with no marker dot.
+        if (end - start > 0.125) {
+          timecodeStart = start;
+          timecodeEnd = end;
+        } else {
+          timecodeStart = start;
+        }
+      }
 
       await onSubmit(
         trimmed,
         timecodeStart,
-        undefined,
+        timecodeEnd,
         finalAnnotation,
         replyToId ?? undefined,
         commentVisibility,
@@ -414,6 +450,7 @@ export function CommentInput({
 
       setBody("");
       setMentionUserIds([]);
+      setRangeStart(null);
       // Drawing-state cleanup touches the SHARED singleton canvas + global store,
       // so gate it on ownership: an inactive compare pane (captureAnnotation false)
       // must NOT clear() the other pane's in-progress drawing or flip the global
@@ -457,10 +494,13 @@ export function CommentInput({
       <div className="px-4 pt-3 pb-2">
         <div className="relative">
           <div className="flex items-start gap-0 rounded-lg border border-border bg-bg-tertiary focus-within:border-accent/50 focus-within:ring-1 focus-within:ring-accent/20">
-            {/* Inline timecode badge — show when timecode attached (normal mode) or in drawing mode */}
-            {hasTimecode && (timecodeAttached || drawingActive) && (
+            {/* Inline timecode badge — show when timecode attached (normal mode) or in drawing mode.
+                While marking a range, this previews the live out-point as the playhead moves. */}
+            {hasTimecode && (timecodeAttached || drawingActive || rangeStart !== null) && (
               <span className="shrink-0 ml-2.5 mt-[9px] rounded bg-amber-500/20 px-1.5 py-0.5 font-mono text-[11px] text-amber-400 leading-none select-none">
-                {displayTime(playheadTime)}
+                {rangeStart !== null
+                  ? `${displayTime(rangeStart)} → ${displayTime(playheadTime)}`
+                  : displayTime(playheadTime)}
               </span>
             )}
             <textarea
@@ -582,6 +622,27 @@ export function CommentInput({
                   }
                 >
                   <Clock className="h-4 w-4" />
+                </button>
+              )}
+
+              {/* Mark range — freezes the in-point at the current playhead;
+                  the out-point is wherever the playhead is at submit time. */}
+              {hasTimecode && (
+                <button
+                  className={cn(
+                    "h-7 w-7 flex items-center justify-center rounded-md transition-colors",
+                    rangeStart !== null
+                      ? "text-amber-400 bg-amber-400/10"
+                      : "text-text-tertiary hover:bg-bg-tertiary hover:text-text-secondary",
+                  )}
+                  onClick={handleRangeToggle}
+                  title={
+                    rangeStart !== null
+                      ? "Cancel range (Esc)"
+                      : "Mark range start"
+                  }
+                >
+                  <ChevronsLeftRight className="h-4 w-4" />
                 </button>
               )}
 

@@ -102,6 +102,97 @@ describe('CommentInput timecode at playhead 0', () => {
   })
 })
 
+describe('CommentInput range marking', () => {
+  it('marks a range: freezes the start, badge previews the live end, submit carries both', async () => {
+    useReviewStore.getState().setPlayheadTime(10)
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    render(
+      <CommentInput assetId="a1" projectId="p1" assetType="video" onSubmit={onSubmit} />,
+    )
+
+    fireEvent.click(screen.getByTitle('Mark range start'))
+    expect(screen.getByText('00:00:10:00 → 00:00:10:00')).toBeInTheDocument()
+
+    // Scrub forward while composing — the badge tracks the live out-point.
+    useReviewStore.getState().setPlayheadTime(20)
+    expect(await screen.findByText('00:00:10:00 → 00:00:20:00')).toBeInTheDocument()
+
+    await typeAndSubmit('range comment')
+
+    const [, timecodeStart, timecodeEnd] = onSubmit.mock.calls[0]
+    expect(timecodeStart).toBe(10)
+    expect(timecodeEnd).toBe(20)
+  })
+
+  it('clicking the range button again before submit cancels the range', async () => {
+    useReviewStore.getState().setPlayheadTime(10)
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    render(
+      <CommentInput assetId="a1" projectId="p1" assetType="video" onSubmit={onSubmit} />,
+    )
+
+    fireEvent.click(screen.getByTitle('Mark range start'))
+    fireEvent.click(screen.getByTitle('Cancel range (Esc)'))
+    expect(screen.getByTitle('Mark range start')).toBeInTheDocument()
+
+    useReviewStore.getState().setPlayheadTime(20)
+    await typeAndSubmit('point comment again')
+
+    const [, timecodeStart, timecodeEnd] = onSubmit.mock.calls[0]
+    expect(timecodeStart).toBe(20)
+    expect(timecodeEnd).toBeUndefined()
+  })
+
+  it('Escape cancels an in-progress range mark', () => {
+    useReviewStore.getState().setPlayheadTime(10)
+    render(
+      <CommentInput assetId="a1" projectId="p1" assetType="video" onSubmit={vi.fn()} />,
+    )
+
+    fireEvent.click(screen.getByTitle('Mark range start'))
+    const textarea = screen.getByPlaceholderText('Leave your comment...')
+    fireEvent.keyDown(textarea, { key: 'Escape' })
+
+    expect(screen.getByTitle('Mark range start')).toBeInTheDocument()
+  })
+
+  it('submitting without scrubbing (start === end) falls back to a plain point timecode', async () => {
+    useReviewStore.getState().setPlayheadTime(10)
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    render(
+      <CommentInput assetId="a1" projectId="p1" assetType="video" onSubmit={onSubmit} />,
+    )
+
+    fireEvent.click(screen.getByTitle('Mark range start'))
+    await typeAndSubmit('no real movement')
+
+    const [, timecodeStart, timecodeEnd] = onSubmit.mock.calls[0]
+    expect(timecodeStart).toBe(10)
+    expect(timecodeEnd).toBeUndefined()
+  })
+
+  it('resets range state after a successful submit — the next comment starts clean', async () => {
+    useReviewStore.getState().setPlayheadTime(10)
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    render(
+      <CommentInput assetId="a1" projectId="p1" assetType="video" onSubmit={onSubmit} />,
+    )
+
+    fireEvent.click(screen.getByTitle('Mark range start'))
+    useReviewStore.getState().setPlayheadTime(20)
+    await typeAndSubmit('first range comment')
+    expect(onSubmit.mock.calls[0][2]).toBe(20)
+
+    expect(screen.getByTitle('Mark range start')).toBeInTheDocument()
+
+    useReviewStore.getState().setPlayheadTime(30)
+    await typeAndSubmit('second plain comment')
+    const [, timecodeStart, timecodeEnd] = onSubmit.mock.calls[1]
+    expect(timecodeStart).toBe(30)
+    expect(timecodeEnd).toBeUndefined()
+  })
+})
+
 describe('CommentInput compare drawing props (annotationActive / onToggleAnnotation)', () => {
   it('routes the pencil through onToggleAnnotation, not the global drawing toggle', () => {
     const onToggle = vi.fn()
