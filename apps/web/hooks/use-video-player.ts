@@ -13,6 +13,21 @@ export interface QualityLevel {
   label: string
 }
 
+// The transcoder scales each rendition to fit inside a target box (1920x1080,
+// 1280x720, 640x360, …) preserving aspect ratio (never crops, never
+// stretches — see packages/transcoder/ffmpeg_transcoder.py). For a source
+// that isn't exactly 16:9, the real encoded height comes out under the
+// nominal tier (e.g. a 1790x956 source scaled into the 1080p box actually
+// encodes at 1026px tall). Bucket the real height up to the nearest standard
+// tier so the picker shows "1080p", not the literal "1026p".
+const STANDARD_HEIGHT_TIERS = [240, 360, 480, 720, 1080, 1440, 2160]
+
+export function qualityLabel(height: number, bitrate: number): string {
+  if (!height) return `${Math.round(bitrate / 1000)}kbps`
+  const tier = STANDARD_HEIGHT_TIERS.find((t) => t >= height)
+  return `${tier ?? height}p`
+}
+
 export interface VideoPlayerControls {
   play: () => void
   pause: () => void
@@ -205,7 +220,7 @@ export function useVideoPlayer(
           index,
           height: level.height,
           bitrate: level.bitrate,
-          label: level.height ? `${level.height}p` : `${Math.round(level.bitrate / 1000)}kbps`,
+          label: qualityLabel(level.height, level.bitrate),
         }))
         setQualityLevels(levels)
         setCurrentQuality(-1) // start on auto
