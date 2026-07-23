@@ -15,6 +15,7 @@ class MediaFileResponse(BaseModel):
     s3_key_raw: str
     s3_key_processed: Optional[str]
     s3_key_thumbnail: Optional[str]
+    s3_key_transcript: Optional[str] = None
     width: Optional[int]
     height: Optional[int]
     duration_seconds: Optional[float]
@@ -27,6 +28,7 @@ class AssetVersionResponse(BaseModel):
     asset_id: uuid.UUID
     version_number: int
     processing_status: ProcessingStatus
+    transcript_requested: bool = False
     created_by: uuid.UUID
     created_at: datetime
     files: list[MediaFileResponse] = []
@@ -64,6 +66,13 @@ class StreamUrlResponse(BaseModel):
     url: str
     asset_type: AssetType
     expires_in: int = 3600
+
+class TranscriptUrlResponse(BaseModel):
+    url: Optional[str] = None
+    expires_in: int = 3600
+
+class TranscriptRequestResponse(BaseModel):
+    status: str = "requested"
 
 class NotificationResponse(BaseModel):
     id: uuid.UUID

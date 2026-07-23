@@ -12,7 +12,7 @@ from ..models.asset import Asset, AssetVersion, MediaFile, AssetType, FileType, 
 from ..models.project import Project, ProjectMember, ProjectRole
 from ..models.share import AssetShare
 from ..models.activity import Mention, Notification, NotificationType
-from ..schemas.asset import AssetResponse, AssetVersionResponse, AssetUpdate, StreamUrlResponse, MediaFileResponse
+from ..schemas.asset import AssetResponse, AssetVersionResponse, AssetUpdate, StreamUrlResponse, MediaFileResponse, TranscriptUrlResponse, TranscriptRequestResponse
 from ..schemas.notification import AssignmentUpdate
 from ..services.permissions import require_project_role, require_asset_access, can_access_asset, is_public_project, get_project_member
 from ..services.s3_service import generate_presigned_get_url, build_download_filename
@@ -285,6 +285,88 @@ def get_stream_url(
             url = generate_presigned_get_url(s3_key)
 
     return StreamUrlResponse(url=url, asset_type=asset.asset_type)
+
+
+@router.get("/assets/{asset_id}/transcript", response_model=TranscriptUrlResponse)
+def get_transcript_url(
+    asset_id: uuid.UUID,
+    version_id: Optional[uuid.UUID] = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    asset = db.query(Asset).filter(Asset.id == asset_id, Asset.deleted_at.is_(None)).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    require_asset_access(db, asset, current_user)
+
+    if version_id:
+        version = db.query(AssetVersion).filter(
+            AssetVersion.id == version_id,
+            AssetVersion.asset_id == asset_id,
+            AssetVersion.deleted_at.is_(None),
+        ).first()
+    else:
+        version = db.query(AssetVersion).filter(
+            AssetVersion.asset_id == asset_id,
+            AssetVersion.deleted_at.is_(None),
+        ).order_by(AssetVersion.version_number.desc()).first()
+
+    if not version:
+        raise HTTPException(status_code=404, detail="No version found")
+
+    media_file = db.query(MediaFile).filter(MediaFile.version_id == version.id).first()
+    if not media_file or not media_file.s3_key_transcript:
+        return TranscriptUrlResponse(url=None)
+
+    return TranscriptUrlResponse(url=generate_presigned_get_url(media_file.s3_key_transcript))
+
+
+@router.post("/assets/{asset_id}/transcript", response_model=TranscriptRequestResponse)
+def request_transcript(
+    asset_id: uuid.UUID,
+    version_id: Optional[uuid.UUID] = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """On-demand transcript generation — owner-only, since each request is a
+    real cost against the project's transcription provider. Dispatched
+    immediately (not deferred to upload time): the version is typically
+    already encoded and ready by the time an owner asks for this."""
+    asset = db.query(Asset).filter(Asset.id == asset_id, Asset.deleted_at.is_(None)).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    require_project_role(db, asset.project_id, current_user, ProjectRole.owner)
+
+    if asset.asset_type not in (AssetType.video, AssetType.audio):
+        raise HTTPException(status_code=400, detail="Transcripts are only available for video/audio assets")
+
+    if version_id:
+        version = db.query(AssetVersion).filter(
+            AssetVersion.id == version_id,
+            AssetVersion.asset_id == asset_id,
+            AssetVersion.deleted_at.is_(None),
+        ).first()
+    else:
+        version = db.query(AssetVersion).filter(
+            AssetVersion.asset_id == asset_id,
+            AssetVersion.deleted_at.is_(None),
+        ).order_by(AssetVersion.version_number.desc()).first()
+
+    if not version:
+        raise HTTPException(status_code=404, detail="No version found")
+
+    media_file = db.query(MediaFile).filter(MediaFile.version_id == version.id).first()
+    if not media_file:
+        raise HTTPException(status_code=404, detail="Media file not found")
+
+    version.transcript_requested = True
+    db.commit()
+
+    from ..tasks.transcription_tasks import transcribe_asset
+    from ..tasks.celery_app import send_task_safe
+    send_task_safe(transcribe_asset, str(asset_id), str(version.id))
+
+    return TranscriptRequestResponse(status="requested")
 
 
 @router.post("/assets/{asset_id}/versions", response_model=InitiateUploadResponse)

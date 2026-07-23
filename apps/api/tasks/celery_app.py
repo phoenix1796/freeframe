@@ -14,6 +14,7 @@ celery_app = Celery(
     backend=settings.redis_url,
     include=[
         "apps.api.tasks.transcode_tasks",
+        "apps.api.tasks.transcription_tasks",
         "apps.api.tasks.watermark_tasks",
         "apps.api.tasks.reminder_tasks",
         "apps.api.tasks.email_tasks",
@@ -49,6 +50,10 @@ celery_app.conf.update(
     # Route tasks to queues
     task_routes={
         "apps.api.tasks.transcode_tasks.*": {"queue": "transcoding"},
+        # Transcription is I/O-bound (waiting on the provider's API), not
+        # CPU-bound like encoding — deliberately kept off the transcoding
+        # queue so it never competes with encode jobs for that concurrency.
+        "apps.api.tasks.transcription_tasks.*": {"queue": "default"},
         "apps.api.tasks.email_tasks.send_magic_code_email": {"queue": "email_high"},
         "apps.api.tasks.email_tasks.send_invite_email": {"queue": "email_high"},
         "apps.api.tasks.email_tasks.send_mention_email": {"queue": "email_low"},

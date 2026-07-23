@@ -82,6 +82,12 @@ class Settings(BaseSettings):
     # Worker concurrency settings
     transcoding_concurrency: int = 2  # Number of concurrent video transcoding jobs
     email_concurrency: int = 2  # Number of concurrent email sending jobs
+
+    # Transcription: runs as an independent task from encoding (see
+    # tasks/transcription_tasks.py) — "none" disables it regardless of what a
+    # version requests. Only "assemblyai" is implemented right now.
+    transcription_provider: str = "none"  # "none" or "assemblyai"
+    assemblyai_api_key: str | None = None
     
     # Email settings - supports AWS SES or any SMTP server
     # If mail_provider is "ses", uses AWS SES with aws_mail_* credentials
