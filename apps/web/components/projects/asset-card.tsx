@@ -1,6 +1,7 @@
 'use client'
 
 import * as React from 'react'
+import NextImage from 'next/image'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { Film, Music, Image as ImageIcon, Images, MessageSquare, MoreHorizontal, Check, Share2, Download, Link as LinkIcon, Pencil, Trash2 } from 'lucide-react'
 import { cn, formatRelativeTime, formatBytes } from '@/lib/utils'
@@ -106,13 +107,14 @@ export function AssetCard({
         aspectMap[aspectRatio],
       )}>
         {thumbnailUrl && !imgError ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <NextImage
             src={thumbnailUrl}
             alt={asset.name}
+            fill
+            sizes="(max-width: 768px) 50vw, 300px"
             onError={() => setImgError(true)}
             className={cn(
-              'h-full w-full transition-transform duration-200 group-hover:scale-[1.02]',
+              'transition-transform duration-200 group-hover:scale-[1.02]',
               thumbnailScale === 'fill' ? 'object-cover' : 'object-contain',
             )}
           />

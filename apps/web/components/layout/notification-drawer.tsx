@@ -11,6 +11,7 @@ import {
   Settings,
 } from 'lucide-react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useNotificationStore } from '@/stores/notification-store'
 import { formatRelativeTime } from '@/lib/utils'
 import { cn } from '@/lib/utils'
@@ -44,6 +45,7 @@ function getNotificationText(n: Notification): { title: string; subtitle: string
 }
 
 function NotificationItem({ notification, onClose }: { notification: Notification; onClose: () => void }) {
+  const router = useRouter()
   const { markAsRead } = useNotificationStore()
   const Icon = notificationIcons[notification.type]
   const { title, subtitle } = getNotificationText(notification)
@@ -53,7 +55,7 @@ function NotificationItem({ notification, onClose }: { notification: Notificatio
     // Navigate to asset if possible
     if (notification.project_id && notification.asset_id) {
       const qs = notification.comment_id ? `?commentId=${notification.comment_id}` : ''
-      window.location.href = `/projects/${notification.project_id}/assets/${notification.asset_id}${qs}`
+      router.push(`/projects/${notification.project_id}/assets/${notification.asset_id}${qs}`)
       onClose()
     }
   }

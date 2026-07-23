@@ -2,11 +2,9 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import useSWR from 'swr'
 import { ReviewProvider, useReview } from '@/components/review/review-provider'
-import { VideoPlayer } from '@/components/review/video-player'
-import { AudioPlayer } from '@/components/review/audio-player'
-import { ImageViewer } from '@/components/review/image-viewer'
 import { AnnotationCanvas } from '@/components/review/annotation-canvas'
 import { AnnotationOverlay } from '@/components/review/annotation-overlay'
 import { CommentPanel } from '@/components/review/comment-panel'
@@ -14,7 +12,6 @@ import { CommentInput } from '@/components/review/comment-input'
 // ApprovalBar removed for now
 import { VersionSwitcher } from '@/components/review/version-switcher'
 import { ShareDialog } from '@/components/review/share-dialog'
-import { CompareOverlay } from '@/components/review/compare/compare-overlay'
 import { useReviewStore } from '@/stores/review-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { useComments } from '@/hooks/use-comments'
@@ -44,6 +41,33 @@ const acceptByType: Record<string, string> = {
   image: 'image/*',
   image_carousel: 'image/*',
 }
+
+// Code-split per asset type: only VideoPlayer (hls.js), AudioPlayer
+// (wavesurfer.js), or ImageViewer (react-zoom-pan-pinch) is ever needed at
+// once, and CompareOverlay is opt-in — none should ship in the initial
+// bundle for every visit to this route.
+const ViewerLoading = () => (
+  <div className="flex-1 flex items-center justify-center">
+    <div className="h-8 w-8 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+  </div>
+)
+
+const VideoPlayer = dynamic(
+  () => import('@/components/review/video-player').then((m) => m.VideoPlayer),
+  { ssr: false, loading: ViewerLoading },
+)
+const AudioPlayer = dynamic(
+  () => import('@/components/review/audio-player').then((m) => m.AudioPlayer),
+  { ssr: false, loading: ViewerLoading },
+)
+const ImageViewer = dynamic(
+  () => import('@/components/review/image-viewer').then((m) => m.ImageViewer),
+  { ssr: false, loading: ViewerLoading },
+)
+const CompareOverlay = dynamic(
+  () => import('@/components/review/compare/compare-overlay').then((m) => m.CompareOverlay),
+  { ssr: false, loading: ViewerLoading },
+)
 
 function ReviewScreenInner({ projectId }: { projectId: string }) {
   const router = useRouter()

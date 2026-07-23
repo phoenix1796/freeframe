@@ -1,6 +1,8 @@
 'use client'
 
 import * as React from 'react'
+import NextImage from 'next/image'
+import { useRouter } from 'next/navigation'
 import {
   Folder,
   File,
@@ -202,11 +204,12 @@ function SubfolderCard({ subfolder, onClick }: SubfolderCardProps) {
             <Folder className="h-10 w-10 text-text-tertiary" />
           </div>
         ) : thumbs.length === 1 ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img
+          <NextImage
             src={thumbs[0]}
             alt={subfolder.name}
-            className="absolute inset-0 h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+            fill
+            sizes="(max-width: 768px) 50vw, 300px"
+            className="object-cover transition-transform duration-200 group-hover:scale-[1.03]"
             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
           />
         ) : (
@@ -216,17 +219,22 @@ function SubfolderCard({ subfolder, onClick }: SubfolderCardProps) {
             thumbs.length >= 3 && 'grid-cols-2 grid-rows-2',
           )}>
             {thumbs.slice(0, 4).map((url, i) => (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img
+              <div
                 key={i}
-                src={url}
-                alt=""
                 className={cn(
-                  'h-full w-full object-cover',
+                  'relative h-full w-full',
                   thumbs.length === 3 && i === 0 && 'row-span-2',
                 )}
-                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-              />
+              >
+                <NextImage
+                  src={url}
+                  alt=""
+                  fill
+                  sizes="150px"
+                  className="object-cover"
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                />
+              </div>
             ))}
           </div>
         )}
@@ -248,10 +256,9 @@ function SubfolderCard({ subfolder, onClick }: SubfolderCardProps) {
 function ListRowThumb({ asset, TypeIcon }: { asset: FolderShareAssetItem; TypeIcon: React.ElementType }) {
   const [imgError, setImgError] = React.useState(false)
   return (
-    <div className="h-14 w-14 shrink-0 rounded-md overflow-hidden bg-bg-tertiary flex items-center justify-center">
+    <div className="relative h-14 w-14 shrink-0 rounded-md overflow-hidden bg-bg-tertiary flex items-center justify-center">
       {asset.thumbnail_url && !imgError ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={asset.thumbnail_url} alt={asset.name} className="h-full w-full object-cover" onError={() => setImgError(true)} />
+        <NextImage src={asset.thumbnail_url} alt={asset.name} fill sizes="56px" className="object-cover" onError={() => setImgError(true)} />
       ) : (
         <TypeIcon className="h-6 w-6 text-text-tertiary/60" />
       )}
@@ -293,11 +300,12 @@ function AssetGridCard({ asset, allowDownload, token, shareSession, isSelected, 
       {/* Thumbnail */}
       <div className={cn('w-full relative overflow-hidden bg-bg-tertiary', aspectClass)}>
         {asset.thumbnail_url && !imgError ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <NextImage
             src={asset.thumbnail_url}
             alt={asset.name}
-            className={cn('h-full w-full transition-transform duration-200 group-hover:scale-[1.02]', thumbnailScale === 'fill' ? 'object-cover' : 'object-contain')}
+            fill
+            sizes="(max-width: 768px) 50vw, 300px"
+            className={cn('transition-transform duration-200 group-hover:scale-[1.02]', thumbnailScale === 'fill' ? 'object-cover' : 'object-contain')}
             onError={() => setImgError(true)}
           />
         ) : (
@@ -1038,6 +1046,7 @@ export function FolderShareViewer({
   branding,
   onAssetClick,
 }: FolderShareViewerProps) {
+  const router = useRouter()
   // Build share_session query param for all API calls
   const sessionParam = shareSession ? `&share_session=${encodeURIComponent(shareSession)}` : ''
   const [currentSubfolderId, setCurrentSubfolderId] = React.useState<string | null>(null)
@@ -1282,7 +1291,7 @@ export function FolderShareViewer({
                       if (token) {
                         document.cookie = `ff_access_token=${token}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`
                       }
-                      window.location.href = '/projects'
+                      router.push('/projects')
                     }
                   }}
                   className="flex w-full items-center gap-2 px-3 py-2 text-sm text-text-primary hover:bg-bg-tertiary transition-colors"

@@ -1,6 +1,7 @@
 'use client'
 
 import * as React from 'react'
+import NextImage from 'next/image'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { X, Download, MoreHorizontal, Layers, Share2, Trash2, FolderInput, FolderIcon, Check, Film, Music, Image as ImageIcon, Images, Link as LinkIcon, Pencil } from 'lucide-react'
 import { cn, formatRelativeTime, formatBytes } from '@/lib/utils'
@@ -518,8 +519,7 @@ export function AssetGrid({
                 {/* Square thumbnail with checkbox overlay */}
                 <div className="relative h-10 w-10 shrink-0 rounded-md bg-bg-tertiary overflow-hidden flex items-center justify-center">
                   {thumb ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={thumb} alt={asset.name} className="h-full w-full object-cover" />
+                    <NextImage src={thumb} alt={asset.name} fill sizes="40px" className="object-cover" />
                   ) : (
                     <TypeIcon className="h-6 w-6 text-text-tertiary/60" />
                   )}
