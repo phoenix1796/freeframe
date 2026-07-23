@@ -65,6 +65,20 @@ export function TranscriptPanel({ assetId, versionId, transcriptRequested, isOwn
     (url: string) => fetch(url).then((r) => r.json()),
   )
 
+  // A request can be stuck with no url AND no error — e.g. one made before
+  // this error-tracking existed, or a task lost to a worker restart. Give
+  // owners a way out after a while instead of an infinite, silent spinner.
+  const stillGenerating = effectivelyRequested && !urlData?.url && !urlData?.error
+  const [showRetryHint, setShowRetryHint] = React.useState(false)
+  React.useEffect(() => {
+    if (!stillGenerating) {
+      setShowRetryHint(false)
+      return
+    }
+    const timer = setTimeout(() => setShowRetryHint(true), 20000)
+    return () => clearTimeout(timer)
+  }, [stillGenerating, versionId])
+
   const triggerTranscript = async () => {
     if (!versionId) return
     setRequesting(true)
@@ -118,6 +132,14 @@ export function TranscriptPanel({ assetId, versionId, transcriptRequested, isOwn
       <div className="flex-1 flex flex-col items-center justify-center gap-2 p-6 text-center">
         <Loader2 className="h-5 w-5 animate-spin text-text-tertiary" />
         <p className="text-xs text-text-tertiary">Generating transcript…</p>
+        {isOwner && showRetryHint && (
+          <div className="mt-1 space-y-1.5">
+            <p className="text-xs text-text-tertiary">Taking longer than expected.</p>
+            <Button size="sm" variant="secondary" onClick={triggerTranscript} disabled={requesting}>
+              {requesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Retry'}
+            </Button>
+          </div>
+        )}
       </div>
     )
   }
