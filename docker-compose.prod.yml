@@ -74,7 +74,7 @@ x-api-env: &api-env
 
 services:
   api:
-    image: 418837801842.dkr.ecr.eu-north-1.amazonaws.com/freeframe/api:production-54b789d
+    image: 418837801842.dkr.ecr.eu-north-1.amazonaws.com/freeframe/api:production-f2c1e7e
     environment:
       <<: *api-env
       DISABLE_DOCS: "true"
@@ -100,7 +100,7 @@ services:
     restart: unless-stopped
 
   worker:
-    image: 418837801842.dkr.ecr.eu-north-1.amazonaws.com/freeframe/api:production-54b789d
+    image: 418837801842.dkr.ecr.eu-north-1.amazonaws.com/freeframe/api:production-f2c1e7e
     environment: *api-env
     networks:
       - default
@@ -115,7 +115,7 @@ services:
   # dedicated consumer. Without "default" here they queue forever unread,
   # same bug the patch fixed on the producer side.
   email_worker:
-    image: 418837801842.dkr.ecr.eu-north-1.amazonaws.com/freeframe/api:production-54b789d
+    image: 418837801842.dkr.ecr.eu-north-1.amazonaws.com/freeframe/api:production-f2c1e7e
     environment: *api-env
     networks:
       - default
@@ -124,7 +124,7 @@ services:
     restart: unless-stopped
 
   beat:
-    image: 418837801842.dkr.ecr.eu-north-1.amazonaws.com/freeframe/api:production-54b789d
+    image: 418837801842.dkr.ecr.eu-north-1.amazonaws.com/freeframe/api:production-f2c1e7e
     environment: *api-env
     networks:
       - default
@@ -136,7 +136,7 @@ services:
   # --build-arg NEXT_PUBLIC_API_URL=https://api.freeframe.mkt.techvzero.com),
   # not read at runtime — Next.js NEXT_PUBLIC_* vars aren't dynamic.
   web:
-    image: 418837801842.dkr.ecr.eu-north-1.amazonaws.com/freeframe/web:production-54b789d
+    image: 418837801842.dkr.ecr.eu-north-1.amazonaws.com/freeframe/web:production-f2c1e7e
     environment:
       FRONTEND_URL: ${FRONTEND_URL}
     ports:
