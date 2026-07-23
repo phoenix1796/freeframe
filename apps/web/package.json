@@ -31,6 +31,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-zoom-pan-pinch": "^3.7.0",
+    "sharp": "^0.35.3",
     "swr": "^2.3.3",
     "tailwind-merge": "^3.3.0",
     "wavesurfer.js": "^7.12.10",
