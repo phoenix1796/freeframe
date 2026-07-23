@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     # testing on a LAN via a machine's IP; do not use "*" in production.
     cors_allow_origins: str = ""
     transcoder_engine: str = "ffmpeg"
+    # HLS quality ladder to generate per video, comma-separated, in QUALITY_MAP
+    # order (packages/transcoder/ffmpeg_transcoder.py). Each entry is one more
+    # simultaneous libx264 encode branch + its own set of segments to upload,
+    # so trimming this directly cuts both encode time and upload count.
+    transcode_qualities: str = "1080p,720p,360p"
 
     # Maximum size (bytes) for a single uploaded file. 0 = unlimited (no per-file cap).
     # Note: S3 multipart still caps effective size at ~10,000 parts x chunk size.

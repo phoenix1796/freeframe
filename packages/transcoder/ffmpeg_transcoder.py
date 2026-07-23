@@ -4,11 +4,18 @@ import os
 import shutil
 import subprocess
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
 import boto3
 from botocore.config import Config
 from .base import BaseTranscoder, TranscodeJob, TranscodeResult, VideoMetadata
+
+# HLS output is thousands of small segment files for a long recording;
+# uploading them one at a time serializes on per-request network latency
+# to the S3 backend rather than CPU or bandwidth. A small thread pool lets
+# many small uploads overlap instead.
+_UPLOAD_WORKERS = 12
 
 
 def parse_probe_metadata(data: dict) -> Optional[VideoMetadata]:
@@ -195,18 +202,23 @@ class FFmpegTranscoder(BaseTranscoder):
             # Timeout scales with expected duration - 4 hours for very large files
             self._run(ffmpeg_cmd, timeout=14400, label="ffmpeg")
 
-            # 4. Upload HLS files to S3
+            # 4. Upload HLS files to S3 (parallel — see _UPLOAD_WORKERS above)
+            def _upload_one(f: Path) -> str:
+                relative = f.relative_to(hls_dir)
+                s3_key = f"{job.output_s3_prefix}/{relative}"
+                content_type, cache_control = self._get_content_type(f.name)
+                self.s3.upload_file(
+                    str(f), self.bucket, s3_key,
+                    ExtraArgs={"ContentType": content_type, "CacheControl": cache_control},
+                )
+                return s3_key
+
+            files_to_upload = [f for f in hls_dir.rglob("*") if f.is_file()]
             uploaded_keys = []
-            for f in hls_dir.rglob("*"):
-                if f.is_file():
-                    relative = f.relative_to(hls_dir)
-                    s3_key = f"{job.output_s3_prefix}/{relative}"
-                    content_type, cache_control = self._get_content_type(f.name)
-                    self.s3.upload_file(
-                        str(f), self.bucket, s3_key,
-                        ExtraArgs={"ContentType": content_type, "CacheControl": cache_control},
-                    )
-                    uploaded_keys.append(s3_key)
+            with ThreadPoolExecutor(max_workers=_UPLOAD_WORKERS) as pool:
+                futures = [pool.submit(_upload_one, f) for f in files_to_upload]
+                for future in as_completed(futures):
+                    uploaded_keys.append(future.result())
 
             # 5. Generate and upload thumbnail (using streaming URL)
             thumb_path = work_dir / "thumb_0001.jpg"
