@@ -170,6 +170,13 @@ export function FolderCard({
         {/* Folder thumbnail preview */}
         <FolderThumbnails projectId={folder.project_id} folderId={folder.id} itemCount={folder.item_count} />
 
+        {/* Folder badge — content-derived thumbnails (e.g. a folder holding a
+            single video) would otherwise look identical to that asset's own
+            card, with nothing marking this as a folder. */}
+        <div className="absolute top-2 left-2 flex h-6 w-6 items-center justify-center rounded-md bg-black/60 backdrop-blur-sm">
+          <Folder className="h-3.5 w-3.5 text-white" />
+        </div>
+
         {/* Info */}
         <div className="px-3 py-2">
           <div className="flex items-start justify-between gap-1">
