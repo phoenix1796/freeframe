@@ -4,7 +4,6 @@ import os
 import shutil
 import subprocess
 import tempfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
 import boto3
@@ -12,10 +11,13 @@ from botocore.config import Config
 from .base import BaseTranscoder, TranscodeJob, TranscodeResult, VideoMetadata
 
 # HLS output is thousands of small segment files for a long recording;
-# uploading them one at a time serializes on per-request network latency
-# to the S3 backend rather than CPU or bandwidth. A small thread pool lets
-# many small uploads overlap instead.
-_UPLOAD_WORKERS = 12
+# uploading them one at a time serializes on per-request network latency to
+# the S3 backend rather than CPU or bandwidth. s5cmd (pip-installed alongside
+# the app — see apps/api/requirements.txt, ships the Go binary as a platform
+# wheel) uploads with a concurrent worker pool instead of boto3's serial
+# upload_file loop.
+_UPLOAD_CONCURRENCY = 12
+_S5CMD_TIMEOUT = 1800  # 30 min ceiling for one cp invocation
 
 
 def parse_probe_metadata(data: dict) -> Optional[VideoMetadata]:
@@ -50,11 +52,19 @@ def parse_probe_metadata(data: dict) -> Optional[VideoMetadata]:
 
 
 class FFmpegTranscoder(BaseTranscoder):
-    def __init__(self, s3_client, bucket: str, s3_endpoint: str = None):
+    def __init__(
+        self, s3_client, bucket: str, s3_endpoint: str = None,
+        s3_access_key: str = None, s3_secret_key: str = None, s3_region: str = None,
+    ):
         self.s3 = s3_client
         self.bucket = bucket
         self.s3_endpoint = s3_endpoint
-    
+        # Only needed for the s5cmd upload subprocess below — presigned URLs
+        # (self.s3, above) are signed locally by boto3 and never touch these.
+        self.s3_access_key = s3_access_key
+        self.s3_secret_key = s3_secret_key
+        self.s3_region = s3_region
+
     def _get_presigned_url(self, s3_key: str, expires_in: int = 7200) -> str:
         """Generate a presigned URL for streaming input to FFmpeg."""
         return self.s3.generate_presigned_url(
@@ -62,6 +72,28 @@ class FFmpegTranscoder(BaseTranscoder):
             Params={"Bucket": self.bucket, "Key": s3_key},
             ExpiresIn=expires_in,
         )
+
+    def _run_s5cmd(self, args: list[str]) -> str:
+        """Run an s5cmd subcommand, raising RuntimeError with stderr on failure."""
+        cmd = ["s5cmd"]
+        if self.s3_endpoint:
+            cmd += ["--endpoint-url", self.s3_endpoint]
+        cmd += args
+        env = os.environ.copy()
+        if self.s3_access_key:
+            env["AWS_ACCESS_KEY_ID"] = self.s3_access_key
+        if self.s3_secret_key:
+            env["AWS_SECRET_ACCESS_KEY"] = self.s3_secret_key
+        if self.s3_region:
+            env["AWS_REGION"] = self.s3_region
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, errors="replace",
+            timeout=_S5CMD_TIMEOUT, env=env,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.strip()
+            raise RuntimeError(f"s5cmd {' '.join(args[:2])} exited {result.returncode}: {stderr or 'no stderr output'}")
+        return result.stdout
 
     @staticmethod
     def _run(cmd: list[str], timeout: int | None = None, label: str = "ffmpeg") -> str:
@@ -202,23 +234,20 @@ class FFmpegTranscoder(BaseTranscoder):
             # Timeout scales with expected duration - 4 hours for very large files
             self._run(ffmpeg_cmd, timeout=14400, label="ffmpeg")
 
-            # 4. Upload HLS files to S3 (parallel — see _UPLOAD_WORKERS above)
-            def _upload_one(f: Path) -> str:
-                relative = f.relative_to(hls_dir)
-                s3_key = f"{job.output_s3_prefix}/{relative}"
-                content_type, cache_control = self._get_content_type(f.name)
-                self.s3.upload_file(
-                    str(f), self.bucket, s3_key,
-                    ExtraArgs={"ContentType": content_type, "CacheControl": cache_control},
-                )
-                return s3_key
-
-            files_to_upload = [f for f in hls_dir.rglob("*") if f.is_file()]
-            uploaded_keys = []
-            with ThreadPoolExecutor(max_workers=_UPLOAD_WORKERS) as pool:
-                futures = [pool.submit(_upload_one, f) for f in files_to_upload]
-                for future in as_completed(futures):
-                    uploaded_keys.append(future.result())
+            # 4. Upload HLS files to S3 via s5cmd (see _UPLOAD_CONCURRENCY above).
+            # One `cp` call per extension since --content-type/--cache-control
+            # apply to the whole invocation, and playlists vs segments need
+            # different values (see CONTENT_TYPE_MAP / _get_content_type).
+            dest = f"s3://{self.bucket}/{job.output_s3_prefix}/"
+            for pattern in ("*.m3u8", "*.ts"):
+                content_type, cache_control = self._get_content_type(pattern.lstrip("*"))
+                self._run_s5cmd([
+                    "cp", "--concurrency", str(_UPLOAD_CONCURRENCY),
+                    "--include", pattern,
+                    "--content-type", content_type,
+                    "--cache-control", cache_control,
+                    f"{hls_dir}/", dest,
+                ])
 
             # 5. Generate and upload thumbnail (using streaming URL)
             thumb_path = work_dir / "thumb_0001.jpg"

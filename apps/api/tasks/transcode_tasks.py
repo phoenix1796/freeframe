@@ -89,7 +89,12 @@ def _process_video(db, asset, version, media_file, s3, output_prefix):
     from packages.transcoder.ffmpeg_transcoder import FFmpegTranscoder
     from packages.transcoder.base import TranscodeJob
 
-    transcoder = FFmpegTranscoder(s3, settings.s3_bucket, settings.s3_endpoint)
+    transcoder = FFmpegTranscoder(
+        s3, settings.s3_bucket, settings.s3_endpoint,
+        s3_access_key=settings.s3_access_key,
+        s3_secret_key=settings.s3_secret_key,
+        s3_region=settings.s3_region,
+    )
     job = TranscodeJob(
         media_id=str(asset.id),
         version_id=str(version.id),

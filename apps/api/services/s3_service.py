@@ -2,7 +2,9 @@ import json
 import logging
 import os
 import re
+import subprocess
 import time
+from datetime import datetime
 from functools import lru_cache
 import boto3
 from botocore.config import Config
@@ -10,6 +12,52 @@ from botocore.exceptions import ClientError
 from ..config import settings
 
 logger = logging.getLogger(__name__)
+
+# Bulk/many-object S3 operations (recursive delete, prefix listing) shell out to
+# s5cmd (pip-installed alongside the app, see requirements.txt — ships the Go
+# binary as a platform wheel, no separate Dockerfile install step needed) instead
+# of boto3. Its concurrent worker pool is far faster than boto3's
+# paginate-then-loop pattern once you're dealing with thousands of small objects
+# (an HLS output folder, an orphan-sweep bucket scan). Single-object and
+# signing-only operations (presigned URLs, multipart control-plane, small
+# put_object) stay on boto3 below — there's nothing to parallelize there, and
+# presigned URLs are pure local signing, not a data transfer s5cmd can do.
+_S5CMD_TIMEOUT = 1800  # 30 min ceiling for one invocation; bulk ops can be large
+
+
+def _s5cmd_env() -> dict:
+    env = os.environ.copy()
+    env["AWS_ACCESS_KEY_ID"] = settings.s3_access_key
+    env["AWS_SECRET_ACCESS_KEY"] = settings.s3_secret_key
+    env["AWS_REGION"] = settings.s3_region
+    return env
+
+
+def _s5cmd_base_args() -> list[str]:
+    args = ["s5cmd"]
+    if not _is_aws_s3():
+        args += ["--endpoint-url", settings.s3_endpoint]
+    return args
+
+
+def _run_s5cmd(args: list[str], allow_no_match: bool = False) -> str:
+    """Run an s5cmd subcommand, raising RuntimeError with stderr on failure.
+
+    allow_no_match=True treats s5cmd's "no object found" (a wildcard matching
+    zero remote objects) as success with empty output, matching the old
+    boto3 behavior of a no-op on an empty listing/nothing to delete.
+    """
+    cmd = _s5cmd_base_args() + args
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, errors="replace",
+        timeout=_S5CMD_TIMEOUT, env=_s5cmd_env(),
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        if allow_no_match and "no object found" in stderr.lower():
+            return ""
+        raise RuntimeError(f"s5cmd {' '.join(args[:2])} exited {result.returncode}: {stderr or 'no stderr output'}")
+    return result.stdout
 
 # Short timeouts for the one-off startup bucket check, so a slow or unreachable
 # store can't hang app startup for boto3's default ~60s (deploy-test finding #6).
@@ -358,42 +406,33 @@ def list_stale_multipart_uploads(cutoff):
 
 
 def list_keys(prefix: str):
-    """Yield (key, last_modified, size) for every object under `prefix`, paginated."""
-    s3 = get_s3_client()
-    kwargs = {"Bucket": settings.s3_bucket, "Prefix": prefix}
-    while True:
-        resp = s3.list_objects_v2(**kwargs)
-        for o in resp.get("Contents", []):
-            yield o["Key"], o["LastModified"], o["Size"]
-        if resp.get("IsTruncated"):
-            kwargs["ContinuationToken"] = resp.get("NextContinuationToken")
-        else:
-            break
+    """Yield (key, last_modified, size) for every object under `prefix`.
+
+    `prefix*` is an s5cmd wildcard, not a literal string match — like the old
+    boto3 Prefix= semantics, it recurses through any further "/" nesting under
+    `prefix`, not just one path segment (verified: s5cmd's `*` crosses "/"
+    boundaries, unlike a shell glob).
+    """
+    s3_uri = f"s3://{settings.s3_bucket}/{prefix}*"
+    output = _run_s5cmd(["--json", "ls", s3_uri], allow_no_match=True)
+    strip = f"s3://{settings.s3_bucket}/"
+    for line in output.splitlines():
+        if not line.strip():
+            continue
+        obj = json.loads(line)
+        if obj.get("type") != "file":
+            continue
+        key = obj["key"]
+        if key.startswith(strip):
+            key = key[len(strip):]
+        last_modified = datetime.fromisoformat(obj["last_modified"].replace("Z", "+00:00"))
+        yield key, last_modified, obj["size"]
 
 
 def delete_prefix(prefix: str) -> None:
     """Delete every object whose key starts with `prefix` (works for a single key too —
-    a key is its own prefix). Used to reclaim HLS folders and single processed keys."""
-    s3 = get_s3_client()
-    kwargs = {"Bucket": settings.s3_bucket, "Prefix": prefix}
-    while True:
-        resp = s3.list_objects_v2(**kwargs)
-        objects = [{"Key": o["Key"]} for o in resp.get("Contents", [])]
-        if objects:
-            try:
-                s3.delete_objects(Bucket=settings.s3_bucket, Delete={"Objects": objects})
-            except ClientError as e:
-                # botocore >=1.36 sends a CRC32 data-integrity checksum on batch DeleteObjects
-                # instead of the legacy Content-MD5 header. S3-compatible backends that predate
-                # AWS flexible checksums (older MinIO/Ceph/etc.) reject it with MissingContentMD5.
-                # Fall back to per-key deletes, which require no checksum, so cleanup still works.
-                err = e.response.get("Error", {})
-                if err.get("Code") == "MissingContentMD5" or "content-md5" in err.get("Message", "").lower():
-                    for obj in objects:
-                        s3.delete_object(Bucket=settings.s3_bucket, Key=obj["Key"])
-                else:
-                    raise
-        if resp.get("IsTruncated"):
-            kwargs["ContinuationToken"] = resp.get("NextContinuationToken")
-        else:
-            break
+    a key is its own prefix). Used to reclaim HLS folders (can be thousands of small
+    segment files) and single processed keys. s5cmd's concurrent worker pool clears
+    these far faster than boto3's old paginate-then-batch-delete loop."""
+    s3_uri = f"s3://{settings.s3_bucket}/{prefix}*"
+    _run_s5cmd(["rm", s3_uri], allow_no_match=True)
