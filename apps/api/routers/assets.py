@@ -315,7 +315,11 @@ def get_transcript_url(
         raise HTTPException(status_code=404, detail="No version found")
 
     media_file = db.query(MediaFile).filter(MediaFile.version_id == version.id).first()
-    if not media_file or not media_file.s3_key_transcript:
+    if not media_file:
+        return TranscriptUrlResponse(url=None)
+    if media_file.transcript_error:
+        return TranscriptUrlResponse(url=None, error=media_file.transcript_error)
+    if not media_file.s3_key_transcript:
         return TranscriptUrlResponse(url=None)
 
     return TranscriptUrlResponse(url=generate_presigned_get_url(media_file.s3_key_transcript))
@@ -359,7 +363,9 @@ def request_transcript(
     if not media_file:
         raise HTTPException(status_code=404, detail="Media file not found")
 
+    # Also clears any previous error — this endpoint doubles as "try again".
     version.transcript_requested = True
+    media_file.transcript_error = None
     db.commit()
 
     from ..tasks.transcription_tasks import transcribe_asset

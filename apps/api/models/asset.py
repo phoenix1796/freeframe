@@ -83,6 +83,9 @@ class MediaFile(Base):
     s3_key_processed: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
     s3_key_thumbnail: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
     s3_key_transcript: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    # Set when transcription fails (including "provider not configured") so
+    # the frontend can show a real error instead of polling forever.
+    transcript_error: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     width: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     height: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     duration_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

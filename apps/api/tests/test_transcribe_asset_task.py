@@ -36,6 +36,7 @@ def test_uploads_transcript_and_sets_key_on_success():
         transcribe_asset.apply(args=(str(asset_id), str(version_id)))
 
     assert media_file.s3_key_transcript == f"processed/{asset.project_id}/{asset_id}/{version_id}/transcript.json"
+    assert media_file.transcript_error is None
     mock_put.assert_called_once()
     db.commit.assert_called()
     mock_publish.assert_called_once_with(
@@ -44,8 +45,11 @@ def test_uploads_transcript_and_sets_key_on_success():
     )
 
 
-def test_noop_when_provider_disabled():
-    from apps.api.tasks.transcription_tasks import transcribe_asset
+def test_noop_when_provider_disabled_sets_error():
+    """A disabled provider must leave a real error behind — not look
+    identical to "still generating" (which is what silently returning
+    used to do, leaving the frontend polling forever)."""
+    from apps.api.tasks.transcription_tasks import transcribe_asset, _NOT_CONFIGURED_MESSAGE
 
     asset_id, version_id, asset, version, media_file = _entities()
     db = _mock_db(version, asset, media_file)
@@ -53,11 +57,17 @@ def test_noop_when_provider_disabled():
     with patch("apps.api.tasks.transcription_tasks.SessionLocal", return_value=db), \
          patch("apps.api.tasks.transcription_tasks.generate_presigned_get_url", return_value="https://example/presigned"), \
          patch("apps.api.tasks.transcription_tasks.transcribe_via_provider", return_value=None), \
-         patch("apps.api.tasks.transcription_tasks.put_object") as mock_put:
+         patch("apps.api.tasks.transcription_tasks.put_object") as mock_put, \
+         patch("apps.api.tasks.transcription_tasks._publish_event") as mock_publish:
         transcribe_asset.apply(args=(str(asset_id), str(version_id)))
 
     mock_put.assert_not_called()
     assert media_file.s3_key_transcript is None
+    assert media_file.transcript_error == _NOT_CONFIGURED_MESSAGE
+    mock_publish.assert_called_once_with(
+        str(asset.project_id), "transcript_failed",
+        {"asset_id": str(asset_id), "version_id": str(version_id), "error": _NOT_CONFIGURED_MESSAGE},
+    )
 
 
 def test_provider_exception_is_swallowed_not_raised():
@@ -68,11 +78,14 @@ def test_provider_exception_is_swallowed_not_raised():
 
     with patch("apps.api.tasks.transcription_tasks.SessionLocal", return_value=db), \
          patch("apps.api.tasks.transcription_tasks.generate_presigned_get_url", return_value="https://example/presigned"), \
-         patch("apps.api.tasks.transcription_tasks.transcribe_via_provider", side_effect=RuntimeError("provider blew up")):
+         patch("apps.api.tasks.transcription_tasks.transcribe_via_provider", side_effect=RuntimeError("provider blew up")), \
+         patch("apps.api.tasks.transcription_tasks._publish_event") as mock_publish:
         result = transcribe_asset.apply(args=(str(asset_id), str(version_id)))
 
     assert result.successful()
     assert media_file.s3_key_transcript is None
+    assert media_file.transcript_error == "provider blew up"
+    mock_publish.assert_called_once()
 
 
 def test_returns_early_when_version_missing():

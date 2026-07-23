@@ -2,7 +2,7 @@
 
 import * as React from 'react'
 import useSWR from 'swr'
-import { FileText, Loader2 } from 'lucide-react'
+import { FileText, Loader2, AlertCircle } from 'lucide-react'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -12,6 +12,11 @@ interface TranscriptWord {
   text: string
   start: number
   end: number
+}
+
+interface TranscriptUrlData {
+  url: string | null
+  error: string | null
 }
 
 interface TranscriptPanelProps {
@@ -47,11 +52,12 @@ export function TranscriptPanel({ assetId, versionId, transcriptRequested, isOwn
   const [justRequested, setJustRequested] = React.useState(false)
   const effectivelyRequested = transcriptRequested || justRequested
 
-  const { data: urlData } = useSWR<{ url: string | null }>(
+  const { data: urlData, mutate: mutateUrl } = useSWR<TranscriptUrlData>(
     effectivelyRequested && versionId ? `/assets/${assetId}/transcript?version_id=${versionId}` : null,
-    (key: string) => api.get<{ url: string | null }>(key),
-    // Transcription is a short-lived background job — poll until it lands.
-    { refreshInterval: (data) => (data?.url ? 0 : 5000) },
+    (key: string) => api.get<TranscriptUrlData>(key),
+    // Transcription is a short-lived background job — poll until it lands
+    // (or fails — either way there's nothing more to wait for).
+    { refreshInterval: (data) => (data?.url || data?.error ? 0 : 5000) },
   )
 
   const { data: transcript } = useSWR<{ words: TranscriptWord[] }>(
@@ -59,17 +65,37 @@ export function TranscriptPanel({ assetId, versionId, transcriptRequested, isOwn
     (url: string) => fetch(url).then((r) => r.json()),
   )
 
-  const handleCreateTranscript = async () => {
+  const triggerTranscript = async () => {
     if (!versionId) return
     setRequesting(true)
     try {
       await api.post(`/assets/${assetId}/transcript?version_id=${versionId}`, {})
       setJustRequested(true)
+      // The backend clears any previous error on this same call — reflect
+      // that immediately instead of showing the stale error until the next
+      // poll (up to 5s away).
+      mutateUrl({ url: null, error: null }, { revalidate: false })
     } catch {
       // Silent fail — the button stays put so they can retry.
     } finally {
       setRequesting(false)
     }
+  }
+
+  if (effectivelyRequested && urlData?.error) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center gap-3 p-6 text-center">
+        <div className="h-12 w-12 rounded-full bg-status-error/10 flex items-center justify-center">
+          <AlertCircle className="h-6 w-6 text-status-error" />
+        </div>
+        <p className="text-xs text-text-secondary">{urlData.error}</p>
+        {isOwner && (
+          <Button size="sm" variant="secondary" onClick={triggerTranscript} disabled={requesting}>
+            {requesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Try again'}
+          </Button>
+        )}
+      </div>
+    )
   }
 
   if (!effectivelyRequested) {
@@ -78,7 +104,7 @@ export function TranscriptPanel({ assetId, versionId, transcriptRequested, isOwn
         text={isOwner ? 'No transcript yet for this version.' : 'No transcript yet. Ask a project owner to generate one.'}
         action={
           isOwner && (
-            <Button size="sm" onClick={handleCreateTranscript} disabled={requesting || !versionId}>
+            <Button size="sm" onClick={triggerTranscript} disabled={requesting || !versionId}>
               {requesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Create transcript'}
             </Button>
           )

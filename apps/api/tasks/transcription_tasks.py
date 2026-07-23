@@ -10,6 +10,8 @@ from ..services.transcription_service import transcribe_via_provider
 
 log = logging.getLogger("celery.transcription")
 
+_NOT_CONFIGURED_MESSAGE = "Transcription isn't set up for this instance yet."
+
 
 @celery_app.task
 def transcribe_asset(asset_id: str, version_id: str):
@@ -19,8 +21,9 @@ def transcribe_asset(asset_id: str, version_id: str):
     lightweight `default` queue rather than `transcoding` — this is
     I/O-bound (waiting on the provider's API), not CPU-bound, so it
     shouldn't compete with encode jobs for transcoding-queue concurrency.
-    Best-effort: any failure here is logged and swallowed, never touches
-    processing_status or blocks the video/audio from becoming ready.
+    Never touches processing_status or blocks the video/audio from
+    becoming ready — but DOES record failures on MediaFile.transcript_error
+    so the frontend can show a real error instead of polling forever.
     """
     db = SessionLocal()
     try:
@@ -33,11 +36,17 @@ def transcribe_asset(asset_id: str, version_id: str):
         if not asset or not media_file:
             return
 
+        # Clear any previous error up front — a retry shouldn't show a stale
+        # failure message while a fresh attempt is in progress.
+        media_file.transcript_error = None
+        db.commit()
+
         try:
             audio_url = generate_presigned_get_url(media_file.s3_key_raw, expires_in=7200)
             words = transcribe_via_provider(audio_url)
             if words is None:
-                return  # provider disabled
+                _fail(db, media_file, asset, version_id, _NOT_CONFIGURED_MESSAGE)
+                return
 
             output_prefix = f"processed/{asset.project_id}/{asset_id}/{version_id}"
             transcript_key = f"{output_prefix}/transcript.json"
@@ -57,9 +66,20 @@ def transcribe_asset(asset_id: str, version_id: str):
 
         except Exception as exc:
             log.warning("transcription failed for version %s: %s", version_id, exc)
+            _fail(db, media_file, asset, version_id, str(exc) or "Transcription failed.")
 
     finally:
         db.close()
+
+
+def _fail(db, media_file: MediaFile, asset: Asset, version_id: str, message: str):
+    media_file.transcript_error = message[:500]
+    db.commit()
+    _publish_event(str(asset.project_id), "transcript_failed", {
+        "asset_id": str(asset.id),
+        "version_id": version_id,
+        "error": media_file.transcript_error,
+    })
 
 
 def _publish_event(project_id: str, event_type: str, payload: dict):

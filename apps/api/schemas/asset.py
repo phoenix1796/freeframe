@@ -69,6 +69,7 @@ class StreamUrlResponse(BaseModel):
 
 class TranscriptUrlResponse(BaseModel):
     url: Optional[str] = None
+    error: Optional[str] = None
     expires_in: int = 3600
 
 class TranscriptRequestResponse(BaseModel):

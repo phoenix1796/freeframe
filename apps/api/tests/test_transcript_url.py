@@ -22,6 +22,7 @@ def _setup_asset_with_version(mock_db, transcript_key):
     media_file = MagicMock()
     media_file.version_id = version.id
     media_file.s3_key_transcript = transcript_key
+    media_file.transcript_error = None
 
     mock_db.first.side_effect = [asset, version, media_file]
     return asset, version, media_file
@@ -62,3 +63,21 @@ def test_404_when_asset_missing(mock_require_access, client, mock_db, auth_heade
     mock_db.first.return_value = None
     response = client.get(f"/assets/{uuid.uuid4()}/transcript", headers=auth_headers)
     assert response.status_code == 404
+
+
+@patch("apps.api.routers.assets.require_asset_access")
+def test_returns_error_instead_of_polling_forever(
+    mock_require_access, client, mock_db, auth_headers,
+):
+    """A failed/disabled-provider run must surface as an error, not look
+    identical to "still generating" (url=None in both cases otherwise)."""
+    mock_require_access.return_value = None
+    asset, _, media_file = _setup_asset_with_version(mock_db, transcript_key=None)
+    media_file.transcript_error = "Transcription isn't set up for this instance yet."
+
+    response = client.get(f"/assets/{asset.id}/transcript", headers=auth_headers)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["url"] is None
+    assert body["error"] == "Transcription isn't set up for this instance yet."
