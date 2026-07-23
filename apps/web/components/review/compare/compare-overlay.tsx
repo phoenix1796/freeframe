@@ -79,7 +79,16 @@ export function CompareOverlay({ asset, versions, rightVersion, onClose, canComm
   const fallbackLeft =
     [...ready].reverse().find((v) => v.version_number < rightVersion.version_number) ??
     ready.find((v) => v.id !== rightVersion.id) ?? null
-  const left = ready.find((v) => v.id === compareParam) ?? fallbackLeft
+  // `!== rightVersion.id` guards a stale ?compare= — e.g. left over from a
+  // previous compare session, or the route's active version simply moved on
+  // to what ?compare= already pointed at. Without it, both panes silently
+  // converge on the same version_id: two independent Hls.js instances both
+  // streaming (and buffering, at whatever positions they happen to scrub to)
+  // the identical video for the rest of the session — doubled network/CPU,
+  // and confusingly not what "compare" is supposed to show. fallbackLeft
+  // and CompareVersionSelect's excludeId prop both already exclude
+  // rightVersion.id; this was the one path that didn't.
+  const left = ready.find((v) => v.id === compareParam && v.id !== rightVersion.id) ?? fallbackLeft
   const right = rightVersion
 
   const isVideo = asset.asset_type === 'video'

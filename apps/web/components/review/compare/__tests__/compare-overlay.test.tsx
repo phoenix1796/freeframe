@@ -282,6 +282,30 @@ describe('CompareOverlay per-side audio toggle', () => {
   })
 })
 
+describe('CompareOverlay stale/colliding ?compare= param', () => {
+  it('falls back to a different version when ?compare= matches the active (right) version', () => {
+    // A trace showed both panes fetching the identical HLS stream for a whole
+    // session: two independent Hls.js instances both downloading (and
+    // buffering, at whatever position each happened to scrub to) the same
+    // video — double the network/CPU for as long as compare stayed open.
+    // Root cause: ?compare= can be stale (left over from a previous compare
+    // session) or can simply coincide with whatever version is now active on
+    // the right — `ready.find(v => v.id === compareParam)` had no guard
+    // against that collision, unlike fallbackLeft and CompareVersionSelect's
+    // excludeId, which both already exclude rightVersion.id.
+    searchParamsString = 'compare=v-3' // v-3 IS makeVersion(3) === rightVersion below
+    render(
+      <CompareOverlay asset={videoAsset} versions={[makeVersion(1), makeVersion(3)]} rightVersion={makeVersion(3)} onClose={vi.fn()} />,
+    )
+    // Left must NOT collapse onto v-3 — it should fall back to v-1 (the only
+    // other ready version), same as if ?compare= were absent entirely.
+    // (Two panes both on v-3 would render two "Unmute v3"/no "v1" labels at
+    // all — these two assertions alone would fail under the old bug.)
+    expect(screen.getByLabelText('Unmute v1')).toBeInTheDocument()
+    expect(screen.getByLabelText('Mute v3')).toBeInTheDocument()
+  })
+})
+
 describe('CompareOverlay marker click', () => {
   it('seeks with the offset, pauses via toggle (not setIsPlaying), focuses the comment, and opens the closed panel', () => {
     commentsByVersion['v-1'] = [makeComment('c1', 'v-1')]
