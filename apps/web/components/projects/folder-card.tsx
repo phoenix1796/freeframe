@@ -108,7 +108,7 @@ export function FolderCard({
 
         {/* Name + item count — outside/below the icon, not inside a card */}
         <div className="mt-1 flex flex-col items-center gap-0.5 max-w-full">
-          <p className="text-sm font-medium text-text-primary text-center truncate max-w-full px-1">
+          <p className="text-sm font-medium text-text-primary text-center line-clamp-2 break-words max-w-full px-1">
             {folder.name}
           </p>
           <p className="text-xs text-text-tertiary">
