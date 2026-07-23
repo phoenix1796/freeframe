@@ -917,9 +917,29 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
-      {/* ─── Right Panel (Comments + Fields tabs, or Share Link Settings) ─ */}
+      {/* ─── Right Panel (Comments + Fields tabs, or Share Link Settings) ───
+          xl+: persistent inline column, toggled by rightPanelOpen.
+          Below xl there's no room for a side-by-side column, so it becomes
+          a full-screen slide-over instead — shown only once something is
+          actually selected (nothing to show otherwise on a narrow screen). */}
+      {(selectedAsset || (showShareLinks && selectedShareLink)) && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 xl:hidden"
+          onClick={() => {
+            setSelectedAsset(null);
+            setSelectedShareLink(null);
+          }}
+        />
+      )}
       {rightPanelOpen && (
-        <div className="hidden xl:flex w-[360px] flex-col border-l border-border bg-bg-secondary shrink-0">
+        <div
+          className={cn(
+            "flex-col bg-bg-secondary xl:flex xl:static xl:z-auto xl:w-[360px] xl:shrink-0 xl:border-l xl:border-border xl:shadow-none",
+            selectedAsset || (showShareLinks && selectedShareLink)
+              ? "fixed inset-y-0 right-0 z-50 flex w-full shadow-2xl sm:w-[380px]"
+              : "hidden",
+          )}
+        >
           {showShareLinks && selectedShareLink ? (
             <ShareLinkSettingsPanel token={selectedShareLink} />
           ) : (
