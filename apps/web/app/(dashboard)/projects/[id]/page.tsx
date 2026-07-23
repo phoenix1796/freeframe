@@ -75,7 +75,7 @@ export default function ProjectDetailPage() {
   const [rightTab, setRightTab] = React.useState<"comments" | "fields">(
     "comments",
   );
-  const { rightPanelOpen } = useViewStore();
+  const { rightPanelOpen, setRightPanelOpen } = useViewStore();
 
   const [currentFolderId, setCurrentFolderId] = React.useState<string | null>(
     searchParams.get("folder") || null,
@@ -703,6 +703,7 @@ export default function ProjectDetailPage() {
               onAssetSelect={(asset, e) => {
                 e?.stopPropagation();
                 setSelectedAsset(asset as AssetResponse);
+                setRightPanelOpen(true);
               }}
               onAssetOpen={(asset) =>
                 router.push(`/projects/${projectId}/assets/${asset.id}`)
