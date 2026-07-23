@@ -13,13 +13,12 @@
 # ../../cool-api/../firecrawl/lessons.md "Private registry (ECR)" — from
 # the private-server-setup ops repo, not this one).
 #
-# Image tags: `stable-<upstream-release-sha>-patchN`, where patchN is the
-# Nth rebuild off this branch since that release. Currently deployed:
-# `stable-d5611f9-patch1`, built from patch1's commit before this compose
-# file (and the patch2 source changes: celery routing/acks_late fixes,
-# parallel S3 upload, configurable TRANSCODE_QUALITIES) moved into this
-# repo. Next rebuild from this branch's HEAD should push as `-patch2` and
-# update the five `image:` tags below.
+# Image tags: `production-<short-sha>`, the short sha of the `production`
+# commit the image was built from (`git rev-parse --short HEAD`) — traceable
+# 1:1 back to exact source, unlike the earlier `stable-d5611f9-patchN` scheme
+# (kept only for the images built before this branch existed). Rebuild after
+# any change here or under apps/api, apps/web, or packages/transcoder; update
+# all five `image:` tags below to the new sha together.
 #
 # Changes vs upstream docker-compose.prod.yml:
 #   - Removed bundled `postgres` service + `pgdata` volume — uses the shared
@@ -75,7 +74,7 @@ x-api-env: &api-env
 
 services:
   api:
-    image: 418837801842.dkr.ecr.eu-north-1.amazonaws.com/freeframe/api:stable-d5611f9-patch1
+    image: 418837801842.dkr.ecr.eu-north-1.amazonaws.com/freeframe/api:production-10d59be
     environment:
       <<: *api-env
       DISABLE_DOCS: "true"
@@ -101,7 +100,7 @@ services:
     restart: unless-stopped
 
   worker:
-    image: 418837801842.dkr.ecr.eu-north-1.amazonaws.com/freeframe/api:stable-d5611f9-patch1
+    image: 418837801842.dkr.ecr.eu-north-1.amazonaws.com/freeframe/api:production-10d59be
     environment: *api-env
     networks:
       - default
@@ -116,7 +115,7 @@ services:
   # dedicated consumer. Without "default" here they queue forever unread,
   # same bug the patch fixed on the producer side.
   email_worker:
-    image: 418837801842.dkr.ecr.eu-north-1.amazonaws.com/freeframe/api:stable-d5611f9-patch1
+    image: 418837801842.dkr.ecr.eu-north-1.amazonaws.com/freeframe/api:production-10d59be
     environment: *api-env
     networks:
       - default
@@ -125,7 +124,7 @@ services:
     restart: unless-stopped
 
   beat:
-    image: 418837801842.dkr.ecr.eu-north-1.amazonaws.com/freeframe/api:stable-d5611f9-patch1
+    image: 418837801842.dkr.ecr.eu-north-1.amazonaws.com/freeframe/api:production-10d59be
     environment: *api-env
     networks:
       - default
@@ -137,7 +136,7 @@ services:
   # --build-arg NEXT_PUBLIC_API_URL=https://api.freeframe.mkt.techvzero.com),
   # not read at runtime — Next.js NEXT_PUBLIC_* vars aren't dynamic.
   web:
-    image: 418837801842.dkr.ecr.eu-north-1.amazonaws.com/freeframe/web:stable-d5611f9-patch1
+    image: 418837801842.dkr.ecr.eu-north-1.amazonaws.com/freeframe/web:production-10d59be
     environment:
       FRONTEND_URL: ${FRONTEND_URL}
     ports:
