@@ -31,6 +31,13 @@ celery_app.conf.update(
     broker_connection_retry=True,
     broker_connection_max_retries=5,
     broker_pool_limit=0,  # Disable connection pooling in web process to avoid stale connections
+    # A task is only acked after it finishes (not on receipt). Combined with
+    # task_reject_on_worker_lost, a worker that dies/restarts mid-task (deploy,
+    # OOM, crash) puts the task back on the broker for redelivery instead of
+    # silently dropping it — previously a mid-transcode worker restart left the
+    # AssetVersion stuck at processing_status=processing forever, with no retry.
+    task_acks_late=True,
+    task_reject_on_worker_lost=True,
     # Define queues
     task_queues=(
         Queue("default"),
@@ -50,6 +57,20 @@ celery_app.conf.update(
         "apps.api.tasks.email_tasks.send_share_email": {"queue": "email_low"},
         "apps.api.tasks.email_tasks.send_approval_email": {"queue": "email_low"},
         "apps.api.tasks.email_tasks.send_project_added_email": {"queue": "email_low"},
+        # beat_schedule below references these four tasks by their short
+        # @celery_app.task(name=...) name, not the dotted module path, so the
+        # transcode_tasks.* wildcard above never matches them — they used to
+        # fall through to task_default_queue="default", which no container
+        # consumes (worker: transcoding, email_worker: email_high/email_low).
+        # That silently orphaned every beat run, including reap_stale_uploads,
+        # which exists specifically to reclaim uploads stuck like that. Routed
+        # explicitly onto email_worker's queue below (see docker-compose.prod.yml
+        # -Q email_high,email_low,default) since these are lightweight and
+        # infrequent, not worth a dedicated consumer.
+        "reap_stale_uploads": {"queue": "default"},
+        "cleanup_soft_deleted": {"queue": "default"},
+        "sweep_orphan_s3": {"queue": "default"},
+        "send_due_date_reminders": {"queue": "default"},
     },
     # Rate limiting for email queues (SES limits)
     task_annotations={
